@@ -53,90 +53,7 @@ const navItems = [
 
 const statusOptions = ["Not Contacted", "Sent", "Replied", "Booked", "Closed"];
 
-const seedLeads = [
-  {
-    id: "demo-1",
-    name: "Founders Lab Podcast",
-    niche: "business podcast",
-    instagram_handle: "founderslabpod",
-    youtube_url: "https://youtube.com/@founderslabpod",
-    x_handle: "founderslabpod",
-    email: "team@founderslab.example",
-    source: "demo",
-    follower_counts: { youtube: 42800, instagram: 8700, x: 3900 },
-    platform_payload: {
-      youtube: { longVideoCount: 18, recentShortCount: 1 },
-      instagram: { bio: "Founder interviews and clips", reelCount: 2 }
-    },
-    ai_score: 8.4,
-    score_breakdown: { contentWeakness: 8, shortFormGap: 9, moneySignal: 8, urgency: 8 },
-    score_reason: "Strong long-form cadence with limited short clips and clear sponsor/business intent.",
-    notes: "Hosts interview SaaS founders twice per week.",
-    pipeline_stage: "Prospect",
-    deal_value: 0,
-    created_at: new Date().toISOString(),
-    duplicate_candidates: [],
-    outreach_statuses: [
-      { platform: "instagram", status: "Not Contacted", follow_up_count: 0 },
-      { platform: "email", status: "Not Contacted", follow_up_count: 0 }
-    ]
-  },
-  {
-    id: "demo-2",
-    name: "Forge Fitness Austin",
-    niche: "fitness studio",
-    instagram_handle: "forgefitnessatx",
-    email: "hello@forgefitness.example",
-    phone: "+1 512 555 0188",
-    website: "https://forgefitness.example",
-    address: "Austin, TX",
-    source: "demo",
-    follower_counts: { instagram: 15300 },
-    platform_payload: {
-      instagram: { bio: "Austin strength studio", reelCount: 1 },
-      googleMaps: { rating: 4.8, userRatingsTotal: 184, types: ["gym", "health"] }
-    },
-    ai_score: 7.2,
-    score_breakdown: { contentWeakness: 7, shortFormGap: 7, moneySignal: 8, urgency: 7 },
-    score_reason: "Active local brand with clear offer but sporadic reels and no consistent content system.",
-    notes: "Good local business target for recurring clips.",
-    pipeline_stage: "Contacted",
-    deal_value: 0,
-    created_at: new Date(Date.now() - 86400000).toISOString(),
-    duplicate_candidates: [],
-    outreach_statuses: [
-      {
-        platform: "instagram",
-        status: "Sent",
-        follow_up_count: 1,
-        last_contacted_at: new Date(Date.now() - 4 * 86400000).toISOString(),
-        next_follow_up_at: new Date(Date.now() - 86400000).toISOString()
-      },
-      { platform: "email", status: "Not Contacted", follow_up_count: 0 }
-    ]
-  },
-  {
-    id: "demo-3",
-    name: "Maya Ops Daily",
-    niche: "operations consulting",
-    x_handle: "mayaopsdaily",
-    email: "maya@example.com",
-    source: "demo",
-    follower_counts: { x: 22100 },
-    ai_score: 8.9,
-    score_breakdown: { contentWeakness: 8, shortFormGap: 10, moneySignal: 9, urgency: 8 },
-    score_reason: "High authority written content with almost no video presence and strong consulting signal.",
-    notes: "Could pitch text-to-video repurposing.",
-    pipeline_stage: "Booked",
-    deal_value: 2500,
-    created_at: new Date(Date.now() - 2 * 86400000).toISOString(),
-    duplicate_candidates: [],
-    outreach_statuses: [
-      { platform: "x", status: "Booked", follow_up_count: 0 },
-      { platform: "email", status: "Replied", follow_up_count: 0 }
-    ]
-  }
-];
+const initialLeads = [];
 
 function formatCount(value) {
   const number = Number(value || 0);
@@ -246,7 +163,7 @@ function AuthStrip({ supabase, session, email, password, setEmail, setPassword, 
   if (!supabase) {
     return (
       <div className="rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2 text-xs text-white/70">
-        Demo mode. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY for saved sessions.
+        Supabase is not connected. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to save leads.
       </div>
     );
   }
@@ -803,15 +720,15 @@ export default function ShortsAgencyOS() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authMessage, setAuthMessage] = useState("");
-  const [leads, setLeads] = useState(seedLeads);
-  const [selectedLeadId, setSelectedLeadId] = useState(seedLeads[0].id);
-  const [likedLeadIds, setLikedLeadIds] = useState([seedLeads[0].id]);
+  const [leads, setLeads] = useState(initialLeads);
+  const [selectedLeadId, setSelectedLeadId] = useState(null);
+  const [likedLeadIds, setLikedLeadIds] = useState([]);
   const [view, setView] = useState("feed");
   const [source, setSource] = useState("auto");
   const [keyword, setKeyword] = useState("business podcast");
   const [city, setCity] = useState("Austin");
   const [category, setCategory] = useState("fitness studio");
-  const [manualText, setManualText] = useState("@founderslabpod\nhttps://x.com/mayaopsdaily");
+  const [manualText, setManualText] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [saveResults, setSaveResults] = useState(true);
   const [busy, setBusy] = useState("");
@@ -860,10 +777,8 @@ export default function ShortsAgencyOS() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not load leads.");
-      if (data.leads?.length) {
-        setLeads(data.leads);
-        setSelectedLeadId(data.leads[0].id);
-      }
+      setLeads(data.leads || []);
+      setSelectedLeadId(data.leads?.[0]?.id || null);
     } catch (loadError) {
       setError(loadError.message);
     } finally {
@@ -889,8 +804,8 @@ export default function ShortsAgencyOS() {
     if (!supabase) return;
     await supabase.auth.signOut();
     setSession(null);
-    setLeads(seedLeads);
-    setSelectedLeadId(seedLeads[0].id);
+    setLeads(initialLeads);
+    setSelectedLeadId(null);
   }
 
   function mergeLead(nextLead) {
@@ -1296,7 +1211,24 @@ export default function ShortsAgencyOS() {
                   onDealValue={updateDealValue}
                 />
               ) : (
-                <div className="rounded-lg border border-dashed border-white/15 p-8 text-center text-white/45">No matching leads.</div>
+                <div className="rounded-lg border border-dashed border-white/15 p-8 text-center">
+                  <div className="text-xl font-black text-white">{leads.length ? "No leads match your filters" : "No leads yet"}</div>
+                  <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-white/50">
+                    {leads.length
+                      ? "Clear the filters or lower the score threshold."
+                      : "Run the automated finder to pull real prospects from YouTube, Instagram, and Maps."}
+                  </p>
+                  {!leads.length ? (
+                    <button
+                      type="button"
+                      onClick={() => setView("hunt")}
+                      className="mt-5 inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#00f5d4] px-5 text-sm font-black text-black"
+                    >
+                      <Search className="h-4 w-4" aria-hidden="true" />
+                      Find leads
+                    </button>
+                  ) : null}
+                </div>
               )}
             </div>
 
