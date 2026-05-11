@@ -1,0 +1,26 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
+  "devCommand": "npm run dev",
+  "functions": {
+    "app/api/leads/autopilot/route.js": {
+      "maxDuration": 30
+    },
+    "app/api/leads/search/youtube/route.js": {
+      "maxDuration": 30
+    },
+    "app/api/leads/search/instagram/route.js": {
+      "maxDuration": 30
+    },
+    "app/api/leads/search/maps/route.js": {
+      "maxDuration": 30
+    },
+    "app/api/ai/score/route.js": {
+      "maxDuration": 30
+    },
+    "app/api/ai/message/route.js": {
+      "maxDuration": 30
+    }
+  }
+}
