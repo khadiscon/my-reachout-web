@@ -1,7 +1,7 @@
 import { json, missingEnvResponse, normalizeError } from "@/lib/http";
 import { saveLeadsIfRequested } from "@/lib/route-save";
 import { searchMapsLeads } from "@/lib/source-clients";
-import { mergeCrossPlatformLeads } from "@/lib/platform-presence";
+import { prepareLeadBatch } from "@/lib/lead-enrichment";
 
 export async function POST(request) {
   if (!process.env.GOOGLE_MAPS_API_KEY) {
@@ -10,7 +10,7 @@ export async function POST(request) {
 
   try {
     const body = await request.json();
-    const leads = mergeCrossPlatformLeads(
+    const leads = await prepareLeadBatch(
       await searchMapsLeads({
         category: body.category || "fitness studio",
         city: body.city || "Austin",

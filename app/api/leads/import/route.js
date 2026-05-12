@@ -1,7 +1,7 @@
 import { json, normalizeError } from "@/lib/http";
 import { normalizeInstagramLead, normalizeManualHandle } from "@/lib/source-normalizers";
 import { saveLeadsIfRequested } from "@/lib/route-save";
-import { mergeCrossPlatformLeads } from "@/lib/platform-presence";
+import { prepareLeadBatch } from "@/lib/lead-enrichment";
 
 function splitInputs(text = "") {
   return text
@@ -37,7 +37,7 @@ export async function POST(request) {
     const enriched = await enrichInstagramHandles(instagramHandles, body.niche || "manual import");
 
     const enrichedByHandle = new Map(enriched.map((lead) => [lead.instagram_handle, lead]));
-    const leads = mergeCrossPlatformLeads(
+    const leads = await prepareLeadBatch(
       manual.map((lead) => ({
         ...lead,
         niche: body.niche || lead.niche || "",

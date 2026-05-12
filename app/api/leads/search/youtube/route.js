@@ -1,7 +1,7 @@
 import { json, missingEnvResponse, normalizeError } from "@/lib/http";
 import { saveLeadsIfRequested } from "@/lib/route-save";
 import { searchYoutubeLeads } from "@/lib/source-clients";
-import { mergeCrossPlatformLeads } from "@/lib/platform-presence";
+import { prepareLeadBatch } from "@/lib/lead-enrichment";
 
 export async function POST(request) {
   if (!process.env.YOUTUBE_API_KEY) {
@@ -10,7 +10,7 @@ export async function POST(request) {
 
   try {
     const body = await request.json();
-    const leads = mergeCrossPlatformLeads(
+    const leads = await prepareLeadBatch(
       await searchYoutubeLeads({
         keyword: body.keyword || body.niche || "business podcast",
         limit: body.limit || 8,
