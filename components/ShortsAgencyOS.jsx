@@ -12,6 +12,7 @@ import {
   Clipboard,
   Copy,
   DollarSign,
+  ExternalLink,
   Flame,
   Heart,
   Home,
@@ -33,7 +34,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { createSupabaseBrowserClient } from "@/lib/supabase";
-import { PIPELINE_STAGES, PLATFORMS, inferPipelineStage } from "@/lib/lead-utils";
+import { PIPELINE_STAGES, PLATFORMS, inferPipelineStage, productionLeads as withoutPlaceholderLeads } from "@/lib/lead-utils";
 import { getPlatformPresence } from "@/lib/platform-presence";
 
 const sourceOptions = [
@@ -60,6 +61,120 @@ function formatCount(value) {
   if (number >= 1000000) return `${(number / 1000000).toFixed(1)}M`;
   if (number >= 1000) return `${(number / 1000).toFixed(1)}K`;
   return String(number);
+}
+
+function leadAvatarUrl(lead = {}) {
+  return (
+    lead.avatar_url ||
+    lead.profile_image_url ||
+    lead.platform_payload?.instagram?.avatarUrl ||
+    lead.platform_payload?.youtube?.avatarUrl ||
+    lead.platform_payload?.googleMaps?.avatarUrl ||
+    lead.platform_payload?.maps?.avatarUrl ||
+    ""
+  );
+}
+
+function normalizeExternalUrl(url = "") {
+  const value = String(url || "").trim();
+  if (!value) return "";
+  if (/^(https?:|mailto:|tel:)/i.test(value)) return value;
+  return `https://${value}`;
+}
+
+function leadLinks(lead = {}) {
+  const links = [];
+  if (lead.instagram_handle) {
+    links.push({
+      id: "instagram",
+      label: "Instagram",
+      url: `https://www.instagram.com/${String(lead.instagram_handle).replace(/^@/, "")}/`,
+      icon: Instagram
+    });
+  }
+  if (lead.youtube_url) {
+    links.push({ id: "youtube", label: "YouTube", url: normalizeExternalUrl(lead.youtube_url), icon: Youtube });
+  }
+  if (lead.x_handle) {
+    links.push({
+      id: "x",
+      label: "X",
+      url: `https://x.com/${String(lead.x_handle).replace(/^@/, "")}`,
+      icon: AtSign
+    });
+  }
+  if (lead.website) {
+    links.push({ id: "website", label: "Website", url: normalizeExternalUrl(lead.website), icon: ExternalLink });
+  }
+  if (lead.email) {
+    links.push({ id: "email", label: "Email", url: `mailto:${lead.email}`, icon: Mail });
+  }
+  if (lead.phone) {
+    links.push({ id: "phone", label: "Call", url: `tel:${lead.phone}`, icon: Users });
+  }
+  if (lead.address || lead.platform_payload?.googleMaps?.placeId) {
+    const query = encodeURIComponent(`${lead.name || ""} ${lead.address || ""}`.trim());
+    const placeId = lead.platform_payload?.googleMaps?.placeId;
+    links.push({
+      id: "maps",
+      label: "Maps",
+      url: `https://www.google.com/maps/search/?api=1&query=${query}${placeId ? `&query_place_id=${placeId}` : ""}`,
+      icon: MapPin
+    });
+  }
+  return links.filter((link) => link.url);
+}
+
+function LeadLinkButtons({ lead, compact = false, limit = 6 }) {
+  const links = leadLinks(lead).slice(0, limit);
+  if (!links.length) return null;
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {links.map((link) => {
+        const Icon = link.icon;
+        return (
+          <a
+            key={link.id}
+            href={link.url}
+            target={link.url.startsWith("http") ? "_blank" : undefined}
+            rel={link.url.startsWith("http") ? "noreferrer" : undefined}
+            onClick={(event) => event.stopPropagation()}
+            className={clsx(
+              "inline-flex items-center justify-center rounded-md border border-white/10 bg-white/10 font-black text-white transition hover:border-[#00f5d4]/60 hover:bg-[#00f5d4] hover:text-black",
+              compact ? "h-9 w-9" : "h-9 gap-2 px-3 text-xs"
+            )}
+            title={`Open ${link.label}`}
+            aria-label={`Open ${link.label}`}
+          >
+            <Icon className="h-4 w-4" aria-hidden="true" />
+            {compact ? <span className="sr-only">{link.label}</span> : <span>{link.label}</span>}
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
+function LeadAvatar({ lead, className = "h-12 w-12", textClassName = "text-base" }) {
+  const [failed, setFailed] = useState(false);
+  const avatarUrl = leadAvatarUrl(lead);
+
+  return (
+    <div className={clsx("relative shrink-0 overflow-hidden rounded-lg border border-white/15 bg-white/10", className)}>
+      {avatarUrl && !failed ? (
+        <img
+          src={avatarUrl}
+          alt=""
+          className="h-full w-full object-cover"
+          referrerPolicy="no-referrer"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <div className={clsx("grid h-full w-full place-items-center font-black text-white", textClassName)}>{leadInitials(lead)}</div>
+      )}
+    </div>
+  );
 }
 
 function platformName(platform) {
@@ -318,9 +433,7 @@ function LeadReel({
         </div>
 
         <div className="mb-8 max-w-[72%] sm:max-w-[78%]">
-          <div className="mb-4 grid h-20 w-20 place-items-center rounded-lg border border-white/20 bg-white/10 text-2xl font-black shadow-2xl backdrop-blur">
-            {leadInitials(lead)}
-          </div>
+          <LeadAvatar lead={lead} className="mb-4 h-20 w-20 shadow-2xl backdrop-blur" textClassName="text-2xl" />
           <div className="flex items-center gap-2">
             <PlatformIcon className="h-5 w-5 text-[#00f5d4]" aria-hidden="true" />
             <span className="text-sm font-black text-white/80">{visibleHandle(lead)}</span>
@@ -328,6 +441,9 @@ function LeadReel({
           <h1 className="mt-2 text-4xl font-black leading-none tracking-normal text-white sm:text-5xl">{lead.name}</h1>
           <p className="mt-3 text-sm font-bold uppercase tracking-wide text-[#00f5d4]">{lead.niche || lead.source || "new opportunity"}</p>
           <p className="mt-3 max-w-xl text-sm leading-6 text-white/75">{lead.score_reason || lead.notes || "Tap Score to qualify this lead."}</p>
+          <div className="mt-4">
+            <LeadLinkButtons lead={lead} />
+          </div>
         </div>
 
         <div className="grid gap-3 md:grid-cols-[1fr_180px]">
@@ -436,27 +552,33 @@ function LeadStrip({ leads, selectedLeadId, likedLeadIds, onSelect }) {
   return (
     <div className="flex gap-3 overflow-x-auto pb-2 lg:block lg:max-h-[560px] lg:space-y-3 lg:overflow-y-auto lg:overflow-x-hidden lg:pr-1">
       {leads.map((lead) => (
-        <button
+        <article
           key={lead.id}
-          type="button"
-          onClick={() => onSelect(lead.id)}
           className={clsx(
             "min-w-[220px] rounded-lg border p-3 text-left transition hover:-translate-y-0.5 lg:min-w-0 lg:w-full",
             selectedLeadId === lead.id ? "border-[#00f5d4] bg-[#00f5d4]/10" : "border-white/10 bg-white/[0.06]"
           )}
         >
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <div className="truncate text-sm font-black text-white">{lead.name}</div>
-              <div className="mt-1 truncate text-xs text-white/45">{visibleHandle(lead)}</div>
+          <button type="button" onClick={() => onSelect(lead.id)} className="w-full text-left">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-3">
+                <LeadAvatar lead={lead} className="h-10 w-10 rounded-md" textClassName="text-sm" />
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-black text-white">{lead.name}</div>
+                  <div className="mt-1 truncate text-xs text-white/45">{visibleHandle(lead)}</div>
+                </div>
+              </div>
+              {likedLeadIds.includes(lead.id) ? <Heart className="h-4 w-4 shrink-0 fill-[#ff2d55] text-[#ff2d55]" /> : null}
             </div>
-            {likedLeadIds.includes(lead.id) ? <Heart className="h-4 w-4 shrink-0 fill-[#ff2d55] text-[#ff2d55]" /> : null}
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <span className="rounded-full bg-white/10 px-2 py-1 text-[11px] font-black text-white/75">{lead.pipeline_stage}</span>
+              <span className="text-xs font-black text-[#00f5d4]">{lead.ai_score ? Number(lead.ai_score).toFixed(1) : "NA"}</span>
+            </div>
+          </button>
+          <div className="mt-3">
+            <LeadLinkButtons lead={lead} compact limit={4} />
           </div>
-          <div className="mt-3 flex items-center justify-between gap-2">
-            <span className="rounded-full bg-white/10 px-2 py-1 text-[11px] font-black text-white/75">{lead.pipeline_stage}</span>
-            <span className="text-xs font-black text-[#00f5d4]">{lead.ai_score ? Number(lead.ai_score).toFixed(1) : "NA"}</span>
-          </div>
-        </button>
+        </article>
       ))}
     </div>
   );
@@ -590,19 +712,20 @@ function FinderPanel({
                 key={`${lead.source}-${lead.name}-${lead.instagram_handle || lead.youtube_url || lead.website}`}
                 className="rounded-lg border border-white/10 bg-black/25 p-4"
               >
-                <div className="grid h-14 w-14 place-items-center rounded-lg bg-white/10 text-lg font-black text-white">
-                  {leadInitials(lead)}
-                </div>
+                <LeadAvatar lead={lead} className="h-14 w-14" textClassName="text-lg" />
                 <h3 className="mt-4 line-clamp-2 text-lg font-black text-white">{lead.name}</h3>
                 <p className="mt-1 truncate text-sm text-white/50">{lead.niche || lead.source}</p>
-                <button
-                  type="button"
-                  onClick={() => onAdd(lead)}
-                  className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-white text-sm font-black text-black"
-                >
-                  <Plus className="h-4 w-4" aria-hidden="true" />
-                  Add to queue
-                </button>
+                <div className="mt-4 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onAdd(lead)}
+                    className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md bg-white text-sm font-black text-black"
+                  >
+                    <Plus className="h-4 w-4" aria-hidden="true" />
+                    Add
+                  </button>
+                  <LeadLinkButtons lead={lead} compact limit={3} />
+                </div>
               </article>
             ))
           ) : (
@@ -629,14 +752,20 @@ function MessagePanel({ messagePanel, onCopy, onMarkSent, onClose }) {
   return (
     <div className="rounded-lg border border-[#00f5d4]/30 bg-[#00f5d4]/10 p-4">
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-xs font-black uppercase tracking-wide text-[#00f5d4]">{messagePanel.provider || "AI"} wrote this</div>
-          <h2 className="mt-1 text-2xl font-black text-white">{messagePanel.lead.name}</h2>
-          <p className="mt-1 text-sm text-white/55">{platformName(messagePanel.platform)} outreach</p>
+        <div className="flex min-w-0 items-center gap-3">
+          <LeadAvatar lead={messagePanel.lead} className="h-12 w-12" textClassName="text-sm" />
+          <div className="min-w-0">
+            <div className="text-xs font-black uppercase tracking-wide text-[#00f5d4]">{messagePanel.provider || "AI"} wrote this</div>
+            <h2 className="mt-1 truncate text-2xl font-black text-white">{messagePanel.lead.name}</h2>
+            <p className="mt-1 text-sm text-white/55">{platformName(messagePanel.platform)} outreach</p>
+          </div>
         </div>
         <button type="button" onClick={onClose} className="grid h-9 w-9 place-items-center rounded-full bg-white/10 text-white">
           <X className="h-4 w-4" aria-hidden="true" />
         </button>
+      </div>
+      <div className="mt-4">
+        <LeadLinkButtons lead={messagePanel.lead} compact />
       </div>
       {messagePanel.subject ? <div className="mt-4 rounded-md bg-black/30 p-3 text-sm font-black text-white">Subject: {messagePanel.subject}</div> : null}
       <pre className="mt-3 max-h-[360px] overflow-auto whitespace-pre-wrap rounded-lg border border-white/10 bg-black/35 p-4 text-sm leading-6 text-white">
@@ -690,20 +819,26 @@ function PipelineView({ leads, filteredLeads, onDragStart, onDropStage, onSelect
               </div>
               <div className="space-y-3">
                 {stageLeads.map((lead) => (
-                  <button
+                  <article
                     key={lead.id}
-                    type="button"
                     draggable
                     onDragStart={(event) => onDragStart(event, lead)}
-                    onClick={() => onSelect(lead.id)}
                     className="w-full rounded-lg border border-white/10 bg-white/[0.06] p-3 text-left transition hover:border-[#00f5d4]/50"
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-sm font-black text-white">{lead.name}</span>
-                      <span className="text-xs font-black text-[#00f5d4]">{lead.ai_score ? Number(lead.ai_score).toFixed(1) : "NA"}</span>
+                    <button type="button" onClick={() => onSelect(lead.id)} className="w-full text-left">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <LeadAvatar lead={lead} className="h-9 w-9 rounded-md" textClassName="text-xs" />
+                          <span className="truncate text-sm font-black text-white">{lead.name}</span>
+                        </div>
+                        <span className="text-xs font-black text-[#00f5d4]">{lead.ai_score ? Number(lead.ai_score).toFixed(1) : "NA"}</span>
+                      </div>
+                      <div className="mt-1 truncate text-xs text-white/45">{lead.niche || visibleHandle(lead)}</div>
+                    </button>
+                    <div className="mt-3">
+                      <LeadLinkButtons lead={lead} compact limit={3} />
                     </div>
-                    <div className="mt-1 truncate text-xs text-white/45">{lead.niche || visibleHandle(lead)}</div>
-                  </button>
+                  </article>
                 ))}
               </div>
             </div>
@@ -736,7 +871,8 @@ export default function ShortsAgencyOS() {
   const [filters, setFilters] = useState({ niche: "", platform: "all", minScore: 0 });
   const [messagePanel, setMessagePanel] = useState(null);
 
-  const selectedLead = leads.find((lead) => lead.id === selectedLeadId) || leads[0];
+  const liveLeads = useMemo(() => withoutPlaceholderLeads(leads), [leads]);
+  const selectedLead = liveLeads.find((lead) => lead.id === selectedLeadId) || liveLeads[0];
 
   useEffect(() => {
     if (!supabase) return;
@@ -777,8 +913,9 @@ export default function ShortsAgencyOS() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not load leads.");
-      setLeads(data.leads || []);
-      setSelectedLeadId(data.leads?.[0]?.id || null);
+      const nextLeads = withoutPlaceholderLeads(data.leads || []);
+      setLeads(nextLeads);
+      setSelectedLeadId(nextLeads[0]?.id || null);
     } catch (loadError) {
       setError(loadError.message);
     } finally {
@@ -919,9 +1056,24 @@ export default function ShortsAgencyOS() {
   }
 
   async function copyMessage(text) {
-    if (!navigator.clipboard) return;
-    await navigator.clipboard.writeText(text);
-    setAuthMessage("Copied.");
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setAuthMessage("Copied.");
+    } catch {
+      setAuthMessage("Copy failed. Select the message text manually.");
+    }
   }
 
   async function changeStatus(lead, platform, status, extra = {}) {
@@ -1005,7 +1157,7 @@ export default function ShortsAgencyOS() {
   function onDropStage(event, stage) {
     event.preventDefault();
     const leadId = event.dataTransfer.getData("text/plain");
-    const lead = leads.find((item) => item.id === leadId);
+    const lead = liveLeads.find((item) => item.id === leadId);
     if (lead) moveStage(lead, stage);
   }
 
@@ -1025,7 +1177,7 @@ export default function ShortsAgencyOS() {
     selectByOffset(1);
   }
 
-  const filteredLeads = leads.filter((lead) => {
+  const filteredLeads = liveLeads.filter((lead) => {
     const matchesNiche = !filters.niche || (lead.niche || "").toLowerCase().includes(filters.niche.toLowerCase());
     const matchesPlatform =
       filters.platform === "all" ||
@@ -1072,15 +1224,15 @@ export default function ShortsAgencyOS() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [activeLead, selectedLeadId, filteredLeads.length]);
 
-  const statuses = leads.flatMap((lead) => getStatuses(lead));
+  const statuses = liveLeads.flatMap((lead) => getStatuses(lead));
   const sent = statuses.filter((item) => ["Sent", "Replied", "Booked", "Closed"].includes(item.status)).length;
   const replies = statuses.filter((item) => ["Replied", "Booked", "Closed"].includes(item.status)).length;
   const booked = statuses.filter((item) => ["Booked", "Closed"].includes(item.status)).length;
   const month = new Date().getMonth();
-  const monthlyRevenue = leads
+  const monthlyRevenue = liveLeads
     .filter((lead) => new Date(lead.created_at || Date.now()).getMonth() === month)
     .reduce((sum, lead) => sum + Number(lead.deal_value || 0), 0);
-  const dueFollowups = leads.filter((lead) =>
+  const dueFollowups = liveLeads.filter((lead) =>
     getStatuses(lead).some(
       (status) =>
         status.status === "Sent" &&
@@ -1088,7 +1240,7 @@ export default function ShortsAgencyOS() {
         new Date(status.next_follow_up_at).getTime() <= Date.now()
     )
   );
-  const hotLeads = [...leads].sort((a, b) => Number(b.ai_score || 0) - Number(a.ai_score || 0)).slice(0, 4);
+  const hotLeads = [...liveLeads].sort((a, b) => Number(b.ai_score || 0) - Number(a.ai_score || 0)).slice(0, 4);
 
   return (
     <main className="min-h-screen bg-[#070707] px-4 pb-28 pt-4 text-white sm:px-6 lg:px-8">
@@ -1128,9 +1280,9 @@ export default function ShortsAgencyOS() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => session && loadLeads()}
+                onClick={() => (session ? loadLeads() : setAuthMessage("Sign in to sync saved leads."))}
                 className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-white/[0.06] text-white"
-                title="Refresh"
+                title={session ? "Refresh" : "Sign in to sync"}
               >
                 <RefreshCw className={clsx("h-4 w-4", busy === "load" && "animate-spin")} aria-hidden="true" />
               </button>
@@ -1154,8 +1306,8 @@ export default function ShortsAgencyOS() {
         ) : null}
 
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <MiniMetric icon={Flame} label="Hot Leads" value={hotLeads.length} />
-          <MiniMetric icon={Send} label="Sent" value={sent} />
+          <MiniMetric icon={Flame} label="Leads" value={liveLeads.length} />
+          <MiniMetric icon={Send} label="Messages Sent" value={sent} />
           <MiniMetric icon={MessageCircle} label="Replies" value={replies} />
           <MiniMetric icon={DollarSign} label="Revenue" value={`$${monthlyRevenue.toLocaleString()}`} />
         </section>
@@ -1212,13 +1364,13 @@ export default function ShortsAgencyOS() {
                 />
               ) : (
                 <div className="rounded-lg border border-dashed border-white/15 p-8 text-center">
-                  <div className="text-xl font-black text-white">{leads.length ? "No leads match your filters" : "No leads yet"}</div>
+                  <div className="text-xl font-black text-white">{liveLeads.length ? "No leads match your filters" : "No leads yet"}</div>
                   <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-white/50">
-                    {leads.length
+                    {liveLeads.length
                       ? "Clear the filters or lower the score threshold."
                       : "Run the automated finder to pull real prospects from YouTube, Instagram, and Maps."}
                   </p>
-                  {!leads.length ? (
+                  {!liveLeads.length ? (
                     <button
                       type="button"
                       onClick={() => setView("hunt")}
@@ -1303,21 +1455,32 @@ export default function ShortsAgencyOS() {
               onMarkSent={(lead, platform, message) => changeStatus(lead, platform, "Sent", { last_message: message })}
             />
             <div className="space-y-3">
-              {leads.map((lead) => {
+              {liveLeads.map((lead) => {
                 const platform = primaryPlatform(lead);
                 return (
-                  <button
+                  <article
                     key={lead.id}
-                    type="button"
-                    onClick={() => generateMessage(lead, platform)}
                     className="flex w-full items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.06] p-3 text-left"
                   >
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-black text-white">{lead.name}</div>
-                      <div className="truncate text-xs text-white/45">{platformName(platform)} . {visibleHandle(lead)}</div>
+                    <button type="button" onClick={() => generateMessage(lead, platform)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                      <LeadAvatar lead={lead} className="h-10 w-10 rounded-md" textClassName="text-xs" />
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-black text-white">{lead.name}</div>
+                        <div className="truncate text-xs text-white/45">{platformName(platform)} . {visibleHandle(lead)}</div>
+                      </div>
+                    </button>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <LeadLinkButtons lead={lead} compact limit={2} />
+                      <button
+                        type="button"
+                        onClick={() => generateMessage(lead, platform)}
+                        className="grid h-9 w-9 place-items-center rounded-md bg-[#00f5d4] text-black"
+                        title="Generate message"
+                      >
+                        <Send className="h-4 w-4" aria-hidden="true" />
+                      </button>
                     </div>
-                    <Send className="h-4 w-4 shrink-0 text-[#00f5d4]" aria-hidden="true" />
-                  </button>
+                  </article>
                 );
               })}
             </div>
@@ -1326,7 +1489,7 @@ export default function ShortsAgencyOS() {
 
         {view === "pipeline" ? (
           <PipelineView
-            leads={leads}
+            leads={liveLeads}
             filteredLeads={filteredLeads}
             onDragStart={onDragStart}
             onDropStage={onDropStage}
