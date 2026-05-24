@@ -1,6 +1,6 @@
 import { json, normalizeError } from "@/lib/http";
 import { saveLeadsIfRequested } from "@/lib/route-save";
-import { prepareLeadBatch } from "@/lib/lead-enrichment";
+import { mergeCrossPlatformLeads } from "@/lib/platform-presence";
 import { searchInstagramLeads, searchMapsLeads, searchYoutubeLeads } from "@/lib/source-clients";
 
 async function settleSource(name, callback) {
@@ -44,7 +44,7 @@ export async function POST(request) {
     ]);
 
     const rawLeads = results.flatMap((result) => result.leads);
-    const leads = await prepareLeadBatch(rawLeads);
+    const leads = mergeCrossPlatformLeads(rawLeads);
     const saveResult = await saveLeadsIfRequested(request, leads, Boolean(body.save));
 
     return json({

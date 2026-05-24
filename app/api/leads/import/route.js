@@ -1,7 +1,7 @@
 import { json, normalizeError } from "@/lib/http";
 import { normalizeInstagramLead, normalizeManualHandle } from "@/lib/source-normalizers";
 import { saveLeadsIfRequested } from "@/lib/route-save";
-import { prepareLeadBatch } from "@/lib/lead-enrichment";
+import { mergeCrossPlatformLeads } from "@/lib/platform-presence";
 
 function splitInputs(text = "") {
   return text
@@ -13,12 +13,13 @@ function splitInputs(text = "") {
 async function enrichInstagramHandles(handles, keyword) {
   if (!process.env.APIFY_API_KEY || !handles.length) return [];
 
+  const directUrls = handles.map((handle) => `https://www.instagram.com/${String(handle).replace(/^@/, "")}/`);
   const response = await fetch(
     `https://api.apify.com/v2/acts/apify~instagram-profile-scraper/run-sync-get-dataset-items?token=${process.env.APIFY_API_KEY}`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ usernames: handles.map((handle) => String(handle).replace(/^@/, "")) })
+      body: JSON.stringify({ directUrls, resultsType: "details", resultsLimit: handles.length })
     }
   );
 
@@ -36,7 +37,7 @@ export async function POST(request) {
     const enriched = await enrichInstagramHandles(instagramHandles, body.niche || "manual import");
 
     const enrichedByHandle = new Map(enriched.map((lead) => [lead.instagram_handle, lead]));
-    const leads = await prepareLeadBatch(
+    const leads = mergeCrossPlatformLeads(
       manual.map((lead) => ({
         ...lead,
         niche: body.niche || lead.niche || "",

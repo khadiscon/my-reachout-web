@@ -1,7 +1,7 @@
 import { json, missingEnvResponse, normalizeError } from "@/lib/http";
 import { saveLeadsIfRequested } from "@/lib/route-save";
 import { searchInstagramLeads } from "@/lib/source-clients";
-import { prepareLeadBatch } from "@/lib/lead-enrichment";
+import { mergeCrossPlatformLeads } from "@/lib/platform-presence";
 
 export async function POST(request) {
   if (!process.env.APIFY_API_KEY) {
@@ -10,7 +10,7 @@ export async function POST(request) {
 
   try {
     const body = await request.json();
-    const leads = await prepareLeadBatch(
+    const leads = mergeCrossPlatformLeads(
       await searchInstagramLeads({
         keyword: body.keyword || "business podcast",
         handles: body.handles || [],

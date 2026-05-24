@@ -12,20 +12,21 @@ import {
   Clipboard,
   Copy,
   DollarSign,
-  ExternalLink,
   Flame,
-  Heart,
   Home,
   Instagram,
   LogOut,
   Mail,
   MapPin,
   MessageCircle,
+  Pencil,
   Plus,
   RefreshCw,
   Search,
   Send,
   Sparkles,
+  Target,
+  Trash2,
   UserPlus,
   Users,
   X,
@@ -34,8 +35,10 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { createSupabaseBrowserClient } from "@/lib/supabase";
-import { PIPELINE_STAGES, PLATFORMS, inferPipelineStage, productionLeads as withoutPlaceholderLeads } from "@/lib/lead-utils";
+import { PIPELINE_STAGES, PLATFORMS, inferPipelineStage } from "@/lib/lead-utils";
 import { getPlatformPresence } from "@/lib/platform-presence";
+
+const SCORE_THRESHOLD = 7.0;
 
 const sourceOptions = [
   { id: "auto", label: "Auto", icon: Zap },
@@ -54,137 +57,128 @@ const navItems = [
 
 const statusOptions = ["Not Contacted", "Sent", "Replied", "Booked", "Closed"];
 
-const initialLeads = [];
+const SCORE_BREAKDOWN_LABELS = {
+  contentWeakness: "Content Weakness",
+  shortFormGap: "Short-Form Gap",
+  moneySignal: "Money Signal",
+  urgency: "Urgency",
+  platformPresence: "Platform Presence"
+};
+
+const seedLeads = [
+  {
+    id: "demo-1",
+    name: "Founders Lab Podcast",
+    niche: "business podcast",
+    instagram_handle: "founderslabpod",
+    youtube_url: "https://youtube.com/@founderslabpod",
+    x_handle: "founderslabpod",
+    email: "team@founderslab.example",
+    source: "demo",
+    follower_counts: { youtube: 42800, instagram: 8700, x: 3900 },
+    platform_payload: {
+      youtube: { longVideoCount: 18, recentShortCount: 1 },
+      instagram: { bio: "Founder interviews and clips", reelCount: 2 }
+    },
+    ai_score: 8.4,
+    score_breakdown: { contentWeakness: 8, shortFormGap: 9, moneySignal: 8, urgency: 8, platformPresence: 7 },
+    score_reason: "Strong long-form cadence with limited short clips and clear sponsor/business intent.",
+    notes: "Hosts interview SaaS founders twice per week.",
+    pipeline_stage: "Prospect",
+    deal_value: 0,
+    created_at: new Date().toISOString(),
+    duplicate_candidates: [],
+    outreach_statuses: [
+      { platform: "instagram", status: "Not Contacted", follow_up_count: 0 },
+      { platform: "email", status: "Not Contacted", follow_up_count: 0 }
+    ]
+  },
+  {
+    id: "demo-2",
+    name: "Forge Fitness Austin",
+    niche: "fitness studio",
+    instagram_handle: "forgefitnessatx",
+    email: "hello@forgefitness.example",
+    phone: "+1 512 555 0188",
+    website: "https://forgefitness.example",
+    address: "Austin, TX",
+    source: "demo",
+    follower_counts: { instagram: 15300 },
+    platform_payload: {
+      instagram: { bio: "Austin strength studio", reelCount: 1 },
+      googleMaps: { rating: 4.8, userRatingsTotal: 184, types: ["gym", "health"] }
+    },
+    ai_score: 7.2,
+    score_breakdown: { contentWeakness: 7, shortFormGap: 7, moneySignal: 8, urgency: 7, platformPresence: 6 },
+    score_reason: "Active local brand with clear offer but sporadic reels and no consistent content system.",
+    notes: "Good local business target for recurring clips.",
+    pipeline_stage: "Contacted",
+    deal_value: 0,
+    created_at: new Date(Date.now() - 86400000).toISOString(),
+    duplicate_candidates: [],
+    outreach_statuses: [
+      {
+        platform: "instagram",
+        status: "Sent",
+        follow_up_count: 1,
+        last_contacted_at: new Date(Date.now() - 4 * 86400000).toISOString(),
+        next_follow_up_at: new Date(Date.now() - 86400000).toISOString()
+      },
+      { platform: "email", status: "Not Contacted", follow_up_count: 0 }
+    ]
+  },
+  {
+    id: "demo-3",
+    name: "Maya Ops Daily",
+    niche: "operations consulting",
+    x_handle: "mayaopsdaily",
+    email: "maya@example.com",
+    source: "demo",
+    follower_counts: { x: 22100 },
+    ai_score: 8.9,
+    score_breakdown: { contentWeakness: 8, shortFormGap: 10, moneySignal: 9, urgency: 8, platformPresence: 5 },
+    score_reason: "High authority written content with almost no video presence and strong consulting signal.",
+    notes: "Could pitch text-to-video repurposing.",
+    pipeline_stage: "Booked",
+    deal_value: 2500,
+    created_at: new Date(Date.now() - 2 * 86400000).toISOString(),
+    duplicate_candidates: [],
+    outreach_statuses: [
+      { platform: "x", status: "Booked", follow_up_count: 0 },
+      { platform: "email", status: "Replied", follow_up_count: 0 }
+    ]
+  }
+];
+
+// ─── helpers ─────────────────────────────────────────────────────────────────
 
 function formatCount(value) {
-  const number = Number(value || 0);
-  if (number >= 1000000) return `${(number / 1000000).toFixed(1)}M`;
-  if (number >= 1000) return `${(number / 1000).toFixed(1)}K`;
-  return String(number);
-}
-
-function leadAvatarUrl(lead = {}) {
-  return (
-    lead.avatar_url ||
-    lead.profile_image_url ||
-    lead.platform_payload?.instagram?.avatarUrl ||
-    lead.platform_payload?.youtube?.avatarUrl ||
-    lead.platform_payload?.googleMaps?.avatarUrl ||
-    lead.platform_payload?.maps?.avatarUrl ||
-    ""
-  );
-}
-
-function normalizeExternalUrl(url = "") {
-  const value = String(url || "").trim();
-  if (!value) return "";
-  if (/^(https?:|mailto:|tel:)/i.test(value)) return value;
-  return `https://${value}`;
-}
-
-function leadLinks(lead = {}) {
-  const links = [];
-  if (lead.instagram_handle) {
-    links.push({
-      id: "instagram",
-      label: "Instagram",
-      url: `https://www.instagram.com/${String(lead.instagram_handle).replace(/^@/, "")}/`,
-      icon: Instagram
-    });
-  }
-  if (lead.youtube_url) {
-    links.push({ id: "youtube", label: "YouTube", url: normalizeExternalUrl(lead.youtube_url), icon: Youtube });
-  }
-  if (lead.x_handle) {
-    links.push({
-      id: "x",
-      label: "X",
-      url: `https://x.com/${String(lead.x_handle).replace(/^@/, "")}`,
-      icon: AtSign
-    });
-  }
-  if (lead.website) {
-    links.push({ id: "website", label: "Website", url: normalizeExternalUrl(lead.website), icon: ExternalLink });
-  }
-  if (lead.email) {
-    links.push({ id: "email", label: "Email", url: `mailto:${lead.email}`, icon: Mail });
-  }
-  if (lead.phone) {
-    links.push({ id: "phone", label: "Call", url: `tel:${lead.phone}`, icon: Users });
-  }
-  if (lead.address || lead.platform_payload?.googleMaps?.placeId) {
-    const query = encodeURIComponent(`${lead.name || ""} ${lead.address || ""}`.trim());
-    const placeId = lead.platform_payload?.googleMaps?.placeId;
-    links.push({
-      id: "maps",
-      label: "Maps",
-      url: `https://www.google.com/maps/search/?api=1&query=${query}${placeId ? `&query_place_id=${placeId}` : ""}`,
-      icon: MapPin
-    });
-  }
-  return links.filter((link) => link.url);
-}
-
-function LeadLinkButtons({ lead, compact = false, limit = 6 }) {
-  const links = leadLinks(lead).slice(0, limit);
-  if (!links.length) return null;
-
-  return (
-    <div className="flex flex-wrap gap-2">
-      {links.map((link) => {
-        const Icon = link.icon;
-        return (
-          <a
-            key={link.id}
-            href={link.url}
-            target={link.url.startsWith("http") ? "_blank" : undefined}
-            rel={link.url.startsWith("http") ? "noreferrer" : undefined}
-            onClick={(event) => event.stopPropagation()}
-            className={clsx(
-              "inline-flex items-center justify-center rounded-md border border-white/10 bg-white/10 font-black text-white transition hover:border-[#00f5d4]/60 hover:bg-[#00f5d4] hover:text-black",
-              compact ? "h-9 w-9" : "h-9 gap-2 px-3 text-xs"
-            )}
-            title={`Open ${link.label}`}
-            aria-label={`Open ${link.label}`}
-          >
-            <Icon className="h-4 w-4" aria-hidden="true" />
-            {compact ? <span className="sr-only">{link.label}</span> : <span>{link.label}</span>}
-          </a>
-        );
-      })}
-    </div>
-  );
-}
-
-function LeadAvatar({ lead, className = "h-12 w-12", textClassName = "text-base" }) {
-  const [failed, setFailed] = useState(false);
-  const avatarUrl = leadAvatarUrl(lead);
-
-  return (
-    <div className={clsx("relative shrink-0 overflow-hidden rounded-lg border border-white/15 bg-white/10", className)}>
-      {avatarUrl && !failed ? (
-        <img
-          src={avatarUrl}
-          alt=""
-          className="h-full w-full object-cover"
-          referrerPolicy="no-referrer"
-          onError={() => setFailed(true)}
-        />
-      ) : (
-        <div className={clsx("grid h-full w-full place-items-center font-black text-white", textClassName)}>{leadInitials(lead)}</div>
-      )}
-    </div>
-  );
+  const n = Number(value || 0);
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+  return String(n);
 }
 
 function platformName(platform) {
   return platform === "x" ? "X" : platform.charAt(0).toUpperCase() + platform.slice(1);
 }
 
-function scoreClass(score) {
-  if (score >= 8) return "from-[#00f5d4] to-[#16ff7a] text-black";
-  if (score >= 6) return "from-[#ff4d6d] to-[#ffb703] text-black";
-  return "from-white/25 to-white/10 text-white";
+function scoreColor(score) {
+  if (score >= 8) return "#00f5d4";
+  if (score >= SCORE_THRESHOLD) return "#ffb703";
+  return "#ff2d55";
+}
+
+function scoreLabel(score) {
+  if (score >= 9) return "🔥 Fire";
+  if (score >= 8) return "Hot";
+  if (score >= SCORE_THRESHOLD) return "Warm";
+  return "Cold";
+}
+
+function stageColor(stage) {
+  const colors = { Prospect: "#555", Contacted: "#ffb703", Replied: "#00b4ff", Booked: "#00f5d4", Closed: "#16ff7a" };
+  return colors[stage] || "#555";
 }
 
 function stageFromStatus(statuses) {
@@ -201,12 +195,7 @@ function upsertStatus(lead, platform, status, extra = {}) {
   const next = existing
     ? current.map((item) => (item.platform === platform ? { ...item, status, ...extra } : item))
     : [...current, { platform, status, ...extra }];
-
-  return {
-    ...lead,
-    outreach_statuses: next,
-    pipeline_stage: stageFromStatus(next)
-  };
+  return { ...lead, outreach_statuses: next, pipeline_stage: stageFromStatus(next) };
 }
 
 function authHeaders(session) {
@@ -214,13 +203,13 @@ function authHeaders(session) {
 }
 
 function leadPlatforms(lead) {
-  return PLATFORMS.filter((platform) => {
-    if (platform === "instagram") return lead.instagram_handle;
-    if (platform === "youtube") return lead.youtube_url;
-    if (platform === "x") return lead.x_handle;
-    if (platform === "email") return lead.email;
-    if (platform === "phone") return lead.phone;
-    if (platform === "website") return lead.website;
+  return PLATFORMS.filter((p) => {
+    if (p === "instagram") return lead.instagram_handle;
+    if (p === "youtube") return lead.youtube_url;
+    if (p === "x") return lead.x_handle;
+    if (p === "email") return lead.email;
+    if (p === "phone") return lead.phone;
+    if (p === "website") return lead.website;
     return false;
   });
 }
@@ -230,12 +219,7 @@ function primaryPlatform(lead) {
 }
 
 function leadInitials(lead) {
-  return (lead.name || "Lead")
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase();
+  return (lead.name || "Lead").split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 }
 
 function platformIcon(platform) {
@@ -250,392 +234,401 @@ function platformIcon(platform) {
 function visibleHandle(lead) {
   if (lead.instagram_handle) return `@${lead.instagram_handle}`;
   if (lead.x_handle) return `@${lead.x_handle}`;
-  if (lead.youtube_url) return "YouTube channel";
+  if (lead.youtube_url) return "YouTube";
   if (lead.email) return lead.email;
   return lead.website || "new lead";
 }
+
+// ─── sub-components ──────────────────────────────────────────────────────────
 
 function StatusSelect({ lead, platform, onChange, dark = false }) {
   const status = getStatuses(lead).find((item) => item.platform === platform)?.status || "Not Contacted";
   return (
     <select
       value={status}
-      onChange={(event) => onChange(lead, platform, event.target.value)}
+      onChange={(e) => onChange(lead, platform, e.target.value)}
       className={clsx(
         "h-9 rounded-md border px-2 text-xs font-bold",
         dark ? "border-white/15 bg-black/40 text-white" : "border-black/10 bg-white text-black"
       )}
       aria-label={`${platformName(platform)} status`}
     >
-      {statusOptions.map((option) => (
-        <option key={option}>{option}</option>
-      ))}
+      {statusOptions.map((o) => <option key={o}>{o}</option>)}
     </select>
+  );
+}
+
+function ScoreBar({ label, value }) {
+  const pct = Math.min(100, Math.max(0, Number(value || 0) * 10));
+  const color = value >= 8 ? "#00f5d4" : value >= 6 ? "#ffb703" : "#ff2d55";
+  return (
+    <div className="grid gap-1">
+      <div className="flex justify-between text-[10px] font-black">
+        <span className="text-white/55">{label}</span>
+        <span style={{ color }}>{Number(value || 0).toFixed(0)}</span>
+      </div>
+      <div className="h-1.5 rounded-full bg-white/10">
+        <div className="h-1.5 rounded-full transition-all" style={{ width: `${pct}%`, background: color }} />
+      </div>
+    </div>
   );
 }
 
 function AuthStrip({ supabase, session, email, password, setEmail, setPassword, onSignIn, onSignUp, onSignOut, message }) {
   if (!supabase) {
     return (
-      <div className="rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2 text-xs text-white/70">
-        Supabase is not connected. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to save leads.
+      <div className="rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2 text-xs text-white/60">
+        Demo mode — add Supabase env vars to persist leads.
       </div>
     );
   }
-
   if (session) {
     return (
       <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2">
-        <span className="truncate text-xs font-bold text-white/75">{session.user.email}</span>
-        <button
-          type="button"
-          onClick={onSignOut}
-          className="grid h-9 w-9 place-items-center rounded-full bg-white/10 text-white"
-          title="Sign out"
-        >
-          <LogOut className="h-4 w-4" aria-hidden="true" />
+        <span className="truncate text-xs font-bold text-white/65">{session.user.email}</span>
+        <button type="button" onClick={onSignOut} className="grid h-8 w-8 place-items-center rounded-full bg-white/10 text-white" title="Sign out">
+          <LogOut className="h-3.5 w-3.5" />
         </button>
       </div>
     );
   }
-
   return (
     <div className="rounded-lg border border-white/10 bg-white/[0.06] p-3">
       <div className="mb-2 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-white">
-        <UserPlus className="h-4 w-4 text-[#00f5d4]" aria-hidden="true" />
-        Sign in
+        <UserPlus className="h-4 w-4 text-[#00f5d4]" />
+        Sign in to save
       </div>
       <div className="grid gap-2">
-        <input
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          placeholder="Email"
-          className="h-10 rounded-md border border-white/10 bg-black/40 px-3 text-sm text-white placeholder:text-white/35"
-        />
-        <input
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          placeholder="Password"
-          type="password"
-          className="h-10 rounded-md border border-white/10 bg-black/40 px-3 text-sm text-white placeholder:text-white/35"
-        />
+        <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="h-10 rounded-md border border-white/10 bg-black/40 px-3 text-sm text-white placeholder:text-white/30" />
+        <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" type="password" className="h-10 rounded-md border border-white/10 bg-black/40 px-3 text-sm text-white placeholder:text-white/30" />
         <div className="grid grid-cols-2 gap-2">
-          <button type="button" onClick={onSignIn} className="h-10 rounded-md bg-white text-sm font-black text-black">
-            In
-          </button>
-          <button type="button" onClick={onSignUp} className="h-10 rounded-md bg-[#00f5d4] text-sm font-black text-black">
-            Join
-          </button>
+          <button type="button" onClick={onSignIn} className="h-10 rounded-md bg-white text-sm font-black text-black">Sign in</button>
+          <button type="button" onClick={onSignUp} className="h-10 rounded-md bg-[#00f5d4] text-sm font-black text-black">Join</button>
         </div>
       </div>
-      {message ? <p className="mt-2 text-xs text-white/55">{message}</p> : null}
+      {message ? <p className="mt-2 text-xs text-white/50">{message}</p> : null}
     </div>
   );
 }
 
-function MiniMetric({ label, value, icon: Icon }) {
+function MiniMetric({ label, value, icon: Icon, accent }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.06] p-3">
-      <div className="flex items-center justify-between gap-2 text-white/55">
-        <span className="text-[11px] font-black uppercase tracking-wide">{label}</span>
-        <Icon className="h-4 w-4" aria-hidden="true" />
+    <div className="rounded-xl border border-white/10 bg-white/[0.05] p-4">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-black uppercase tracking-widest text-white/40">{label}</span>
+        <Icon className="h-3.5 w-3.5 text-white/25" />
       </div>
-      <div className="mt-2 text-xl font-black text-white">{value}</div>
+      <div className="mt-2 text-2xl font-black" style={{ color: accent || "white" }}>{value}</div>
     </div>
   );
 }
 
-function LeadReel({
-  lead,
-  index,
-  total,
-  liked,
-  busy,
-  onLike,
-  onPass,
-  onNext,
-  onPrevious,
-  onScore,
-  onMessage,
-  onStatus,
-  onStage,
-  onDealValue
-}) {
+function LeadReel({ lead, index, total, busy, onPass, onDelete, onNext, onPrevious, onScore, onMessage, onStatus, onStage, onDealValue, onNoteSave }) {
   const score = Number(lead.ai_score || 0);
   const platforms = leadPlatforms(lead);
   const platform = primaryPlatform(lead);
   const PlatformIcon = platformIcon(platform);
-  const scorePercent = Math.max(0, Math.min(100, score * 10));
   const presence = getPlatformPresence(lead);
+  const breakdown = lead.score_breakdown || {};
+  const hasBreakdown = Object.keys(breakdown).length > 0;
+  const isHot = score >= SCORE_THRESHOLD;
+  const [editingNote, setEditingNote] = useState(false);
+  const [noteText, setNoteText] = useState(lead.notes || "");
+
+  // sync note if lead changes
+  useEffect(() => { setNoteText(lead.notes || ""); setEditingNote(false); }, [lead.id]);
 
   return (
-    <section className="relative min-h-[650px] overflow-hidden rounded-lg border border-white/10 bg-[#111] text-white shadow-[0_24px_90px_rgba(0,0,0,0.45)]">
+    <section className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#111] text-white shadow-[0_32px_80px_rgba(0,0,0,0.5)]">
+      {/* ambient glow */}
       <div
-        className="absolute inset-0"
+        className="pointer-events-none absolute inset-0"
         style={{
-          background:
-            "linear-gradient(145deg, rgba(0,245,212,0.2), transparent 28%), linear-gradient(35deg, rgba(255,45,85,0.34), transparent 38%), linear-gradient(180deg, #202020 0%, #090909 72%)"
+          background: isHot
+            ? "linear-gradient(135deg, rgba(0,245,212,0.12) 0%, transparent 40%), linear-gradient(225deg, rgba(255,45,85,0.18) 0%, transparent 45%), #111"
+            : "linear-gradient(135deg, rgba(255,45,85,0.1) 0%, transparent 40%), #111"
         }}
       />
-      <div className="absolute inset-x-0 top-0 flex items-center justify-between gap-2 p-4">
-        <div className="flex items-center gap-2 rounded-full bg-black/35 px-3 py-1 text-xs font-black backdrop-blur">
-          <Zap className="h-3.5 w-3.5 text-[#00f5d4]" aria-hidden="true" />
-          Opportunity {index + 1}/{total}
+
+      {/* top bar */}
+      <div className="relative flex items-center justify-between gap-2 border-b border-white/[0.07] px-5 py-3">
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-black text-white/35">{index + 1} / {total}</span>
+          <span
+            className="rounded-full px-2.5 py-1 text-[11px] font-black"
+            style={{ background: stageColor(lead.pipeline_stage) + "22", color: stageColor(lead.pipeline_stage) }}
+          >
+            {lead.pipeline_stage}
+          </span>
+          {!isHot && score > 0 && (
+            <span className="rounded-full bg-[#ff2d55]/20 px-2.5 py-1 text-[11px] font-black text-[#ff2d55]">Cold</span>
+          )}
         </div>
-        <div className="rounded-full bg-black/35 px-3 py-1 text-xs font-black backdrop-blur">{lead.pipeline_stage}</div>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={onPrevious} className="grid h-8 w-8 place-items-center rounded-full bg-white/[0.06] text-white/60 hover:bg-white/10" title="Previous">
+            <ChevronUp className="h-4 w-4" />
+          </button>
+          <button type="button" onClick={onNext} className="grid h-8 w-8 place-items-center rounded-full bg-white/[0.06] text-white/60 hover:bg-white/10" title="Next">
+            <ChevronDown className="h-4 w-4" />
+          </button>
+          <button type="button" onClick={() => onDelete(lead)} className="grid h-8 w-8 place-items-center rounded-full bg-white/[0.06] text-white/40 hover:bg-[#ff2d55]/20 hover:text-[#ff2d55]" title="Delete lead">
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
-      <div className="relative flex min-h-[650px] flex-col justify-end p-4 pt-16 sm:p-6">
-        <div className="absolute right-4 top-24 z-10 flex flex-col items-center gap-3 sm:right-5">
-          <button
-            type="button"
-            onClick={() => onLike(lead.id)}
-            className={clsx(
-              "grid h-12 w-12 place-items-center rounded-full border border-white/15 text-white shadow-lg backdrop-blur transition hover:scale-105",
-              liked ? "bg-[#ff2d55]" : "bg-black/45"
-            )}
-            title="Save lead"
-          >
-            <Heart className={clsx("h-5 w-5", liked && "fill-current")} aria-hidden="true" />
-          </button>
-          <span className="text-[11px] font-black text-white">{liked ? "Saved" : "Save"}</span>
-
-          <button
-            type="button"
-            onClick={() => onMessage(lead, platform)}
-            className="grid h-12 w-12 place-items-center rounded-full border border-white/15 bg-black/45 text-white shadow-lg backdrop-blur transition hover:scale-105"
-            title="Generate DM"
-          >
-            <MessageCircle className="h-5 w-5" aria-hidden="true" />
-          </button>
-          <span className="text-[11px] font-black text-white">DM</span>
-
-          <button
-            type="button"
-            onClick={() => onScore(lead)}
-            disabled={busy === `score-${lead.id}`}
-            className="grid h-12 w-12 place-items-center rounded-full border border-white/15 bg-black/45 text-white shadow-lg backdrop-blur transition hover:scale-105 disabled:opacity-60"
-            title="AI score"
-          >
-            <Sparkles className={clsx("h-5 w-5", busy === `score-${lead.id}` && "animate-spin")} aria-hidden="true" />
-          </button>
-          <span className="text-[11px] font-black text-white">Score</span>
-
-          <button
-            type="button"
-            onClick={() => onPass(lead)}
-            className="grid h-12 w-12 place-items-center rounded-full border border-white/15 bg-black/45 text-white shadow-lg backdrop-blur transition hover:scale-105"
-            title="Pass"
-          >
-            <X className="h-5 w-5" aria-hidden="true" />
-          </button>
-          <span className="text-[11px] font-black text-white">Pass</span>
-        </div>
-
-        <div className="mb-8 max-w-[72%] sm:max-w-[78%]">
-          <LeadAvatar lead={lead} className="mb-4 h-20 w-20 shadow-2xl backdrop-blur" textClassName="text-2xl" />
-          <div className="flex items-center gap-2">
-            <PlatformIcon className="h-5 w-5 text-[#00f5d4]" aria-hidden="true" />
-            <span className="text-sm font-black text-white/80">{visibleHandle(lead)}</span>
-          </div>
-          <h1 className="mt-2 text-4xl font-black leading-none tracking-normal text-white sm:text-5xl">{lead.name}</h1>
-          <p className="mt-3 text-sm font-bold uppercase tracking-wide text-[#00f5d4]">{lead.niche || lead.source || "new opportunity"}</p>
-          <p className="mt-3 max-w-xl text-sm leading-6 text-white/75">{lead.score_reason || lead.notes || "Tap Score to qualify this lead."}</p>
-          <div className="mt-4">
-            <LeadLinkButtons lead={lead} />
-          </div>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-[1fr_180px]">
-          <div className="rounded-lg border border-white/10 bg-black/45 p-3 backdrop-blur">
-            <div className="flex flex-wrap gap-2">
-              {[
-                ["YouTube", presence.youtube],
-                ["Instagram", presence.instagram],
-                ["Maps", presence.maps]
-              ].map(([label, isPresent]) => (
-                <span
-                  key={label}
-                  className={clsx(
-                    "inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-black",
-                    isPresent ? "bg-[#00f5d4] text-black" : "bg-white/10 text-white/45"
-                  )}
-                >
-                  {isPresent ? <Check className="h-3 w-3" aria-hidden="true" /> : <X className="h-3 w-3" aria-hidden="true" />}
-                  {label}
-                </span>
-              ))}
-              {Object.entries(lead.follower_counts || {}).map(([itemPlatform, value]) => (
-                <span key={itemPlatform} className="rounded-full bg-white/10 px-3 py-1 text-xs font-black text-white">
-                  {platformName(itemPlatform)} {formatCount(value)}
-                </span>
-              ))}
-              {platforms.map((itemPlatform) => (
-                <span key={itemPlatform} className="rounded-full bg-white/10 px-3 py-1 text-xs font-black text-white/80">
-                  {platformName(itemPlatform)}
-                </span>
-              ))}
+      <div className="relative grid gap-0 lg:grid-cols-[1fr_280px]">
+        {/* left: identity + actions */}
+        <div className="p-5">
+          <div className="flex items-start gap-4">
+            <div className="grid h-16 w-16 shrink-0 place-items-center rounded-xl border border-white/15 bg-white/[0.07] text-xl font-black">
+              {leadInitials(lead)}
             </div>
-
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
-              {PIPELINE_STAGES.map((stage) => (
-                <button
-                  key={stage}
-                  type="button"
-                  onClick={() => onStage(lead, stage)}
-                  className={clsx(
-                    "h-9 rounded-md px-2 text-xs font-black transition",
-                    lead.pipeline_stage === stage ? "bg-white text-black" : "bg-white/10 text-white hover:bg-white/20"
-                  )}
-                >
-                  {stage}
-                </button>
-              ))}
-            </div>
-
-            <div className="mt-4 grid gap-2 sm:grid-cols-2">
-              {platforms.slice(0, 4).map((itemPlatform) => (
-                <div key={itemPlatform} className="flex items-center justify-between gap-2 rounded-md bg-white/10 p-2">
-                  <span className="text-xs font-black text-white/80">{platformName(itemPlatform)}</span>
-                  <StatusSelect lead={lead} platform={itemPlatform} onChange={onStatus} dark />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-white/10 bg-black/45 p-3 backdrop-blur">
-            <div className={clsx("rounded-lg bg-gradient-to-br p-3", scoreClass(score))}>
-              <div className="text-[11px] font-black uppercase tracking-wide opacity-75">Client Fit</div>
-              <div className="mt-1 text-4xl font-black">{score ? score.toFixed(1) : "NA"}</div>
-              <div className="mt-3 h-2 rounded-full bg-black/20">
-                <div className="h-2 rounded-full bg-black" style={{ width: `${scorePercent}%` }} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <PlatformIcon className="h-4 w-4 shrink-0 text-[#00f5d4]" />
+                <span className="truncate text-xs font-bold text-white/55">{visibleHandle(lead)}</span>
               </div>
+              <h1 className="mt-1 text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">{lead.name}</h1>
+              <p className="mt-1 text-xs font-bold uppercase tracking-widest text-[#00f5d4]">{lead.niche || lead.source || "opportunity"}</p>
             </div>
-            <label className="mt-3 block text-[11px] font-black uppercase tracking-wide text-white/45">Deal value</label>
-            <div className="mt-2 flex items-center gap-2 rounded-md border border-white/10 bg-black/35 px-3">
-              <DollarSign className="h-4 w-4 text-white/50" aria-hidden="true" />
+          </div>
+
+          {/* follower counts */}
+          {Object.keys(lead.follower_counts || {}).length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {Object.entries(lead.follower_counts || {}).map(([p, v]) => (
+                <span key={p} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs font-black text-white">
+                  {p === "youtube" ? <Youtube className="h-3 w-3" /> : p === "instagram" ? <Instagram className="h-3 w-3" /> : <AtSign className="h-3 w-3" />}
+                  {formatCount(v)}
+                </span>
+              ))}
+              {presence.present.map((pl) => (
+                <span key={pl} className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs font-black text-white/60">{pl}</span>
+              ))}
+              {presence.missing.map((pl) => (
+                <span key={pl} className="rounded-full border border-[#ff2d55]/20 bg-[#ff2d55]/10 px-3 py-1 text-xs font-black text-[#ff2d55]/80">No {pl}</span>
+              ))}
+            </div>
+          )}
+
+          {/* AI reasoning */}
+          <p className="mt-4 text-sm leading-relaxed text-white/65">
+            {lead.score_reason || lead.notes || "Hit Score to qualify this lead with AI."}
+          </p>
+
+          {/* notes */}
+          <div className="mt-4 rounded-xl border border-white/[0.08] bg-black/30 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-black uppercase tracking-widest text-white/35">Notes</span>
+              <button type="button" onClick={() => { if (editingNote) { onNoteSave(lead, noteText); setEditingNote(false); } else setEditingNote(true); }} className="text-[11px] font-black text-[#00f5d4]">
+                {editingNote ? "Save" : "Edit"}
+              </button>
+            </div>
+            {editingNote ? (
+              <textarea
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                rows={3}
+                autoFocus
+                className="mt-2 w-full resize-none bg-transparent text-sm text-white placeholder:text-white/30 focus:outline-none"
+                placeholder="Add notes about this lead..."
+              />
+            ) : (
+              <p className="mt-1 text-sm text-white/55">{noteText || <span className="italic text-white/25">No notes yet.</span>}</p>
+            )}
+          </div>
+
+          {/* pipeline stage buttons */}
+          <div className="mt-4 grid grid-cols-5 gap-1.5">
+            {PIPELINE_STAGES.map((stage) => (
+              <button
+                key={stage}
+                type="button"
+                onClick={() => onStage(lead, stage)}
+                className={clsx(
+                  "h-9 rounded-lg text-xs font-black transition",
+                  lead.pipeline_stage === stage
+                    ? "text-black"
+                    : "bg-white/[0.06] text-white/55 hover:bg-white/10 hover:text-white"
+                )}
+                style={lead.pipeline_stage === stage ? { background: stageColor(stage) } : {}}
+              >
+                {stage}
+              </button>
+            ))}
+          </div>
+
+          {/* outreach status per platform */}
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {platforms.slice(0, 4).map((p) => (
+              <div key={p} className="flex items-center justify-between gap-2 rounded-lg border border-white/[0.08] bg-black/25 px-3 py-2">
+                <span className="text-xs font-black text-white/60">{platformName(p)}</span>
+                <StatusSelect lead={lead} platform={p} onChange={onStatus} dark />
+              </div>
+            ))}
+          </div>
+
+          {/* action buttons */}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => onMessage(lead, platform)}
+              disabled={!isHot && score > 0}
+              className={clsx(
+                "inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl text-sm font-black transition",
+                isHot || score === 0
+                  ? "bg-[#ff2d55] text-white hover:bg-[#ff4167]"
+                  : "cursor-not-allowed bg-white/[0.06] text-white/30"
+              )}
+              title={!isHot && score > 0 ? `Score too low (${score.toFixed(1)}) — below ${SCORE_THRESHOLD} threshold` : "Generate outreach"}
+            >
+              <MessageCircle className="h-4 w-4" />
+              {busy.startsWith(`message-${lead.id}`) ? "Writing..." : "Generate DM"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onScore(lead)}
+              disabled={busy === `score-${lead.id}`}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-4 text-sm font-black text-white transition hover:bg-white/10 disabled:opacity-50"
+            >
+              <Sparkles className={clsx("h-4 w-4", busy === `score-${lead.id}` && "animate-spin")} />
+              {busy === `score-${lead.id}` ? "Scoring..." : "Score"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onPass(lead)}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-4 text-sm font-black text-white/55 transition hover:bg-white/10"
+            >
+              <X className="h-4 w-4" />
+              Pass
+            </button>
+          </div>
+        </div>
+
+        {/* right: score + deal value */}
+        <div className="border-t border-white/[0.07] p-5 lg:border-l lg:border-t-0">
+          {/* score card */}
+          <div className="rounded-xl p-4" style={{ background: isHot ? "rgba(0,245,212,0.08)" : "rgba(255,45,85,0.08)", border: `1px solid ${scoreColor(score)}22` }}>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-black uppercase tracking-widest" style={{ color: scoreColor(score) }}>
+                {score > 0 ? scoreLabel(score) : "Unscored"}
+              </span>
+              <Target className="h-4 w-4" style={{ color: scoreColor(score) }} />
+            </div>
+            <div className="mt-1 text-5xl font-black" style={{ color: scoreColor(score) }}>
+              {score > 0 ? score.toFixed(1) : "—"}
+            </div>
+            <div className="mt-1 text-xs text-white/35">out of 10</div>
+          </div>
+
+          {/* breakdown bars */}
+          {hasBreakdown && (
+            <div className="mt-4 grid gap-2.5">
+              <span className="text-[11px] font-black uppercase tracking-widest text-white/35">Breakdown</span>
+              {Object.entries(breakdown).map(([key, val]) => (
+                SCORE_BREAKDOWN_LABELS[key] ? <ScoreBar key={key} label={SCORE_BREAKDOWN_LABELS[key]} value={val} /> : null
+              ))}
+            </div>
+          )}
+
+          {/* deal value */}
+          <div className="mt-5">
+            <label className="text-[11px] font-black uppercase tracking-widest text-white/35">Deal Value</label>
+            <div className="mt-2 flex items-center gap-2 rounded-xl border border-white/10 bg-black/30 px-3">
+              <DollarSign className="h-4 w-4 text-white/35" />
               <input
                 type="number"
                 min="0"
                 value={lead.deal_value || 0}
-                onChange={(event) => onDealValue(lead, event.target.value)}
-                className="h-10 w-full bg-transparent text-sm font-black text-white outline-none"
+                onChange={(e) => onDealValue(lead, e.target.value)}
+                className="h-11 w-full bg-transparent text-lg font-black text-white outline-none"
               />
             </div>
           </div>
-        </div>
 
-        <div className="absolute bottom-4 right-4 hidden flex-col gap-2 sm:flex">
-          <button
-            type="button"
-            onClick={onPrevious}
-            className="grid h-10 w-10 place-items-center rounded-full border border-white/15 bg-black/45 text-white backdrop-blur"
-            title="Previous lead"
-          >
-            <ChevronUp className="h-5 w-5" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            onClick={onNext}
-            className="grid h-10 w-10 place-items-center rounded-full border border-white/15 bg-black/45 text-white backdrop-blur"
-            title="Next lead"
-          >
-            <ChevronDown className="h-5 w-5" aria-hidden="true" />
-          </button>
+          {/* contact info */}
+          {(lead.email || lead.phone || lead.website || lead.address) && (
+            <div className="mt-5 grid gap-1.5">
+              <span className="text-[11px] font-black uppercase tracking-widest text-white/35">Contact</span>
+              {lead.email && <a href={`mailto:${lead.email}`} className="truncate text-xs text-[#00f5d4] hover:underline">{lead.email}</a>}
+              {lead.phone && <span className="text-xs text-white/55">{lead.phone}</span>}
+              {lead.website && <a href={lead.website} target="_blank" rel="noopener noreferrer" className="truncate text-xs text-white/40 hover:text-white/70">{lead.website}</a>}
+              {lead.address && <span className="text-xs text-white/40">{lead.address}</span>}
+            </div>
+          )}
         </div>
       </div>
     </section>
   );
 }
 
-function LeadStrip({ leads, selectedLeadId, likedLeadIds, onSelect }) {
+function LeadStrip({ leads, selectedLeadId, onSelect }) {
   return (
-    <div className="flex gap-3 overflow-x-auto pb-2 lg:block lg:max-h-[560px] lg:space-y-3 lg:overflow-y-auto lg:overflow-x-hidden lg:pr-1">
-      {leads.map((lead) => (
-        <article
-          key={lead.id}
-          className={clsx(
-            "min-w-[220px] rounded-lg border p-3 text-left transition hover:-translate-y-0.5 lg:min-w-0 lg:w-full",
-            selectedLeadId === lead.id ? "border-[#00f5d4] bg-[#00f5d4]/10" : "border-white/10 bg-white/[0.06]"
-          )}
-        >
-          <button type="button" onClick={() => onSelect(lead.id)} className="w-full text-left">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-3">
-                <LeadAvatar lead={lead} className="h-10 w-10 rounded-md" textClassName="text-sm" />
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-black text-white">{lead.name}</div>
-                  <div className="mt-1 truncate text-xs text-white/45">{visibleHandle(lead)}</div>
-                </div>
-              </div>
-              {likedLeadIds.includes(lead.id) ? <Heart className="h-4 w-4 shrink-0 fill-[#ff2d55] text-[#ff2d55]" /> : null}
+    <div className="flex gap-2 overflow-x-auto pb-1 lg:block lg:max-h-[540px] lg:space-y-2 lg:overflow-y-auto lg:overflow-x-hidden lg:pr-1">
+      {leads.map((lead) => {
+        const score = Number(lead.ai_score || 0);
+        const isHot = score >= SCORE_THRESHOLD;
+        const isSelected = selectedLeadId === lead.id;
+        return (
+          <button
+            key={lead.id}
+            type="button"
+            onClick={() => onSelect(lead.id)}
+            className={clsx(
+              "min-w-[200px] rounded-xl border p-3 text-left transition lg:min-w-0 lg:w-full",
+              isSelected ? "border-[#00f5d4]/40 bg-[#00f5d4]/[0.07]" : "border-white/[0.07] bg-white/[0.04] hover:border-white/15"
+            )}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-sm font-black text-white">{lead.name}</span>
+              {score > 0 && (
+                <span className="shrink-0 text-xs font-black" style={{ color: scoreColor(score) }}>
+                  {score.toFixed(1)}
+                </span>
+              )}
             </div>
-            <div className="mt-3 flex items-center justify-between gap-2">
-              <span className="rounded-full bg-white/10 px-2 py-1 text-[11px] font-black text-white/75">{lead.pipeline_stage}</span>
-              <span className="text-xs font-black text-[#00f5d4]">{lead.ai_score ? Number(lead.ai_score).toFixed(1) : "NA"}</span>
+            <div className="mt-1 flex items-center justify-between gap-2">
+              <span className="truncate text-xs text-white/40">{visibleHandle(lead)}</span>
+              <span
+                className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black"
+                style={{ background: stageColor(lead.pipeline_stage) + "22", color: stageColor(lead.pipeline_stage) }}
+              >
+                {lead.pipeline_stage}
+              </span>
             </div>
+            {!isHot && score > 0 && (
+              <div className="mt-1.5 text-[10px] font-black text-[#ff2d55]/70">Below threshold</div>
+            )}
           </button>
-          <div className="mt-3">
-            <LeadLinkButtons lead={lead} compact limit={4} />
-          </div>
-        </article>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
-function FinderPanel({
-  source,
-  setSource,
-  keyword,
-  setKeyword,
-  city,
-  setCity,
-  category,
-  setCategory,
-  manualText,
-  setManualText,
-  saveResults,
-  setSaveResults,
-  searchResults,
-  busy,
-  onSubmit,
-  onAdd
-}) {
+function FinderPanel({ source, setSource, keyword, setKeyword, city, setCity, manualText, setManualText, saveResults, setSaveResults, searchResults, busy, onSubmit, onAdd }) {
   return (
-    <div className="grid gap-4 lg:grid-cols-[420px_1fr]">
-      <form onSubmit={onSubmit} className="rounded-lg border border-white/10 bg-white/[0.06] p-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-2xl font-black text-white">Automated lead finder</h2>
-            <p className="mt-1 text-sm text-white/50">Search YouTube, Instagram, and Maps in one run.</p>
-          </div>
-          <label className="inline-flex items-center gap-2 text-xs font-black text-white/65">
-            <input
-              type="checkbox"
-              checked={saveResults}
-              onChange={(event) => setSaveResults(event.target.checked)}
-              className="h-4 w-4 accent-[#00f5d4]"
-            />
-            Save
-          </label>
-        </div>
+    <div className="grid gap-4 lg:grid-cols-[400px_1fr]">
+      <form onSubmit={onSubmit} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
+        <h2 className="text-2xl font-black text-white">Find leads</h2>
+        <p className="mt-1 text-sm text-white/45">Search YouTube, Instagram, and Maps in one run.</p>
 
-        <div className="mt-5 grid grid-cols-2 gap-2">
-          {sourceOptions.map((option) => {
-            const Icon = option.icon;
+        <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {sourceOptions.map((opt) => {
+            const Icon = opt.icon;
             return (
               <button
-                key={option.id}
+                key={opt.id}
                 type="button"
-                onClick={() => setSource(option.id)}
+                onClick={() => setSource(opt.id)}
                 className={clsx(
-                  "inline-flex h-12 items-center justify-center gap-2 rounded-md border px-3 text-sm font-black transition",
-                  source === option.id ? "border-[#00f5d4] bg-[#00f5d4] text-black" : "border-white/10 bg-black/25 text-white"
+                  "inline-flex h-11 items-center justify-center gap-2 rounded-xl border text-sm font-black transition",
+                  source === opt.id ? "border-[#00f5d4] bg-[#00f5d4] text-black" : "border-white/10 bg-black/20 text-white/70 hover:text-white"
                 )}
               >
-                <Icon className="h-4 w-4" aria-hidden="true" />
-                {option.label}
+                <Icon className="h-4 w-4" />
+                {opt.label}
               </button>
             );
           })}
@@ -644,93 +637,68 @@ function FinderPanel({
         <div className="mt-5 space-y-3">
           {source === "auto" ? (
             <div className="grid gap-3 sm:grid-cols-2">
-              <input
-                value={keyword}
-                onChange={(event) => setKeyword(event.target.value)}
-                placeholder="Niche or client type"
-                className="h-12 rounded-md border border-white/10 bg-black/40 px-3 text-sm text-white placeholder:text-white/35"
-              />
-              <input
-                value={city}
-                onChange={(event) => setCity(event.target.value)}
-                placeholder="City for Maps"
-                className="h-12 rounded-md border border-white/10 bg-black/40 px-3 text-sm text-white placeholder:text-white/35"
-              />
+              <input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="Niche or client type" className="h-12 rounded-xl border border-white/10 bg-black/40 px-4 text-sm text-white placeholder:text-white/30" />
+              <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="City for Maps" className="h-12 rounded-xl border border-white/10 bg-black/40 px-4 text-sm text-white placeholder:text-white/30" />
             </div>
           ) : source === "maps" ? (
             <div className="grid gap-3 sm:grid-cols-2">
-              <input
-                value={category}
-                onChange={(event) => setCategory(event.target.value)}
-                placeholder="Business type"
-                className="h-12 rounded-md border border-white/10 bg-black/40 px-3 text-sm text-white placeholder:text-white/35"
-              />
-              <input
-                value={city}
-                onChange={(event) => setCity(event.target.value)}
-                placeholder="City"
-                className="h-12 rounded-md border border-white/10 bg-black/40 px-3 text-sm text-white placeholder:text-white/35"
-              />
+              <input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="Business type" className="h-12 rounded-xl border border-white/10 bg-black/40 px-4 text-sm text-white placeholder:text-white/30" />
+              <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="City" className="h-12 rounded-xl border border-white/10 bg-black/40 px-4 text-sm text-white placeholder:text-white/30" />
             </div>
           ) : source === "manual" ? (
-            <textarea
-              value={manualText}
-              onChange={(event) => setManualText(event.target.value)}
-              placeholder="Paste handles, one per line"
-              rows={7}
-              className="w-full resize-none rounded-md border border-white/10 bg-black/40 px-3 py-3 text-sm text-white placeholder:text-white/35"
-            />
+            <textarea value={manualText} onChange={(e) => setManualText(e.target.value)} placeholder="Paste handles, one per line" rows={6} className="w-full resize-none rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white placeholder:text-white/30" />
           ) : (
-            <input
-              value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
-              placeholder="Niche keyword"
-              className="h-12 w-full rounded-md border border-white/10 bg-black/40 px-3 text-sm text-white placeholder:text-white/35"
-            />
+            <input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="Niche keyword" className="h-12 w-full rounded-xl border border-white/10 bg-black/40 px-4 text-sm text-white placeholder:text-white/30" />
           )}
 
-          <button
-            type="submit"
-            disabled={busy === "search"}
-            className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-[#ff2d55] px-4 text-sm font-black text-white transition hover:bg-[#ff4167] disabled:opacity-60"
-          >
-            <Search className="h-4 w-4" aria-hidden="true" />
-            {busy === "search" ? "Searching..." : source === "auto" ? "Run automated search" : "Find the next batch"}
+          <label className="inline-flex items-center gap-2 text-xs font-black text-white/50">
+            <input type="checkbox" checked={saveResults} onChange={(e) => setSaveResults(e.target.checked)} className="h-4 w-4 accent-[#00f5d4]" />
+            Save results to database
+          </label>
+
+          <button type="submit" disabled={busy === "search"} className="inline-flex h-13 w-full items-center justify-center gap-2 rounded-xl bg-[#ff2d55] py-3 text-sm font-black text-white transition hover:bg-[#ff4167] disabled:opacity-60">
+            <Search className="h-4 w-4" />
+            {busy === "search" ? "Searching..." : source === "auto" ? "Run automated search" : "Find leads"}
           </button>
         </div>
       </form>
 
-      <div className="rounded-lg border border-white/10 bg-white/[0.06] p-4">
+      <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
         <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="text-xl font-black text-white">Fresh pulls</h2>
-          <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-black text-white/70">{searchResults.length} found</span>
+          <h2 className="text-xl font-black text-white">Results</h2>
+          <span className="rounded-full border border-white/10 px-3 py-1 text-xs font-black text-white/50">{searchResults.length} found</span>
         </div>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {searchResults.length ? (
-            searchResults.map((lead) => (
-              <article
-                key={`${lead.source}-${lead.name}-${lead.instagram_handle || lead.youtube_url || lead.website}`}
-                className="rounded-lg border border-white/10 bg-black/25 p-4"
-              >
-                <LeadAvatar lead={lead} className="h-14 w-14" textClassName="text-lg" />
-                <h3 className="mt-4 line-clamp-2 text-lg font-black text-white">{lead.name}</h3>
-                <p className="mt-1 truncate text-sm text-white/50">{lead.niche || lead.source}</p>
-                <div className="mt-4 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onAdd(lead)}
-                    className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md bg-white text-sm font-black text-black"
-                  >
-                    <Plus className="h-4 w-4" aria-hidden="true" />
-                    Add
+            searchResults.map((lead) => {
+              const totalFollowers = Object.values(lead.follower_counts || {}).reduce((s, v) => s + Number(v || 0), 0);
+              const pScore = Number(lead.ai_score || 0);
+              return (
+                <article key={`${lead.source}-${lead.name}`} className="rounded-xl border border-white/10 bg-black/20 p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-white/10 text-base font-black text-white">
+                      {leadInitials(lead)}
+                    </div>
+                    {pScore > 0 && (
+                      <span className="text-sm font-black" style={{ color: scoreColor(pScore) }}>{pScore.toFixed(1)}</span>
+                    )}
+                  </div>
+                  <h3 className="mt-3 line-clamp-2 text-base font-black text-white">{lead.name}</h3>
+                  <p className="mt-0.5 truncate text-xs text-white/45">{lead.niche || lead.source}</p>
+                  {totalFollowers > 0 && (
+                    <p className="mt-1 text-xs font-black text-[#00f5d4]">{formatCount(totalFollowers)} total followers</p>
+                  )}
+                  {lead.address && <p className="mt-0.5 truncate text-xs text-white/35">{lead.address}</p>}
+                  <button type="button" onClick={() => onAdd(lead)} className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-white text-sm font-black text-black hover:bg-white/90">
+                    <Plus className="h-4 w-4" />
+                    Add to queue
                   </button>
-                  <LeadLinkButtons lead={lead} compact limit={3} />
-                </div>
-              </article>
-            ))
+                </article>
+              );
+            })
           ) : (
-            <div className="rounded-lg border border-dashed border-white/15 p-8 text-center text-sm text-white/45 md:col-span-2 xl:col-span-3">
-              No pulls yet.
+            <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-white/35 md:col-span-2 xl:col-span-3">
+              Run a search to pull leads.
             </div>
           )}
         </div>
@@ -740,53 +708,55 @@ function FinderPanel({
 }
 
 function MessagePanel({ messagePanel, onCopy, onMarkSent, onClose }) {
+  const msgLen = messagePanel?.message?.length || 0;
+  const dmWarning = msgLen > 800;
+
   if (!messagePanel) {
     return (
-      <div className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
+      <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
         <h2 className="text-2xl font-black text-white">Message Studio</h2>
-        <p className="mt-2 text-sm text-white/55">Generate a message from any lead card.</p>
+        <p className="mt-2 text-sm text-white/45">Generate a DM from any lead in the queue. Only hot leads (score ≥ {SCORE_THRESHOLD}) are eligible.</p>
       </div>
     );
   }
 
   return (
-    <div className="rounded-lg border border-[#00f5d4]/30 bg-[#00f5d4]/10 p-4">
+    <div className="rounded-2xl border border-[#00f5d4]/20 bg-[#00f5d4]/[0.05] p-5">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <LeadAvatar lead={messagePanel.lead} className="h-12 w-12" textClassName="text-sm" />
-          <div className="min-w-0">
-            <div className="text-xs font-black uppercase tracking-wide text-[#00f5d4]">{messagePanel.provider || "AI"} wrote this</div>
-            <h2 className="mt-1 truncate text-2xl font-black text-white">{messagePanel.lead.name}</h2>
-            <p className="mt-1 text-sm text-white/55">{platformName(messagePanel.platform)} outreach</p>
-          </div>
+        <div>
+          <div className="text-[11px] font-black uppercase tracking-widest text-[#00f5d4]">{messagePanel.provider || "AI"} · {platformName(messagePanel.platform)}</div>
+          <h2 className="mt-1 text-2xl font-black text-white">{messagePanel.lead.name}</h2>
+          {messagePanel.followUp && <p className="mt-0.5 text-xs font-black text-[#ffb703]">Follow-up message</p>}
         </div>
-        <button type="button" onClick={onClose} className="grid h-9 w-9 place-items-center rounded-full bg-white/10 text-white">
-          <X className="h-4 w-4" aria-hidden="true" />
+        <button type="button" onClick={onClose} className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/10 text-white">
+          <X className="h-4 w-4" />
         </button>
       </div>
-      <div className="mt-4">
-        <LeadLinkButtons lead={messagePanel.lead} compact />
-      </div>
-      {messagePanel.subject ? <div className="mt-4 rounded-md bg-black/30 p-3 text-sm font-black text-white">Subject: {messagePanel.subject}</div> : null}
-      <pre className="mt-3 max-h-[360px] overflow-auto whitespace-pre-wrap rounded-lg border border-white/10 bg-black/35 p-4 text-sm leading-6 text-white">
+
+      {messagePanel.subject && (
+        <div className="mt-4 rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm font-black text-white">
+          Subject: {messagePanel.subject}
+        </div>
+      )}
+
+      <pre className="mt-3 max-h-[400px] overflow-auto whitespace-pre-wrap rounded-xl border border-white/[0.08] bg-black/30 p-4 text-sm leading-7 text-white/90">
         {messagePanel.message}
       </pre>
+
+      <div className="mt-2 flex items-center justify-between text-[11px] font-black">
+        <span className={dmWarning ? "text-[#ff2d55]" : "text-white/30"}>
+          {msgLen} chars {dmWarning ? "— trim before sending" : ""}
+        </span>
+      </div>
+
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        <button
-          type="button"
-          onClick={() => onCopy(`${messagePanel.subject ? `${messagePanel.subject}\n\n` : ""}${messagePanel.message}`)}
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-white text-sm font-black text-black"
-        >
-          <Copy className="h-4 w-4" aria-hidden="true" />
+        <button type="button" onClick={() => onCopy(`${messagePanel.subject ? `${messagePanel.subject}\n\n` : ""}${messagePanel.message}`)} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.07] text-sm font-black text-white hover:bg-white/10">
+          <Copy className="h-4 w-4" />
           Copy
         </button>
-        <button
-          type="button"
-          onClick={() => onMarkSent(messagePanel.lead, messagePanel.platform, messagePanel.message)}
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#ff2d55] text-sm font-black text-white"
-        >
-          <Send className="h-4 w-4" aria-hidden="true" />
-          Sent
+        <button type="button" onClick={() => onMarkSent(messagePanel.lead, messagePanel.platform, messagePanel.message)} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#ff2d55] text-sm font-black text-white hover:bg-[#ff4167]">
+          <Send className="h-4 w-4" />
+          Mark as Sent
         </button>
       </div>
     </div>
@@ -794,51 +764,56 @@ function MessagePanel({ messagePanel, onCopy, onMarkSent, onClose }) {
 }
 
 function PipelineView({ leads, filteredLeads, onDragStart, onDropStage, onSelect }) {
+  const totalRevenue = leads.filter((l) => l.pipeline_stage === "Closed").reduce((s, l) => s + Number(l.deal_value || 0), 0);
+  const pipelineValue = leads.filter((l) => l.pipeline_stage === "Booked").reduce((s, l) => s + Number(l.deal_value || 0), 0);
+
   return (
-    <section className="rounded-lg border border-white/10 bg-white/[0.06] p-4">
-      <div className="mb-4 flex items-center justify-between gap-3">
+    <section className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-2xl font-black text-white">Close board</h2>
-          <p className="mt-1 text-sm text-white/50">{leads.length} total leads</p>
+          <p className="mt-0.5 text-sm text-white/45">{leads.length} leads · ${pipelineValue.toLocaleString()} in pipeline · ${totalRevenue.toLocaleString()} closed</p>
         </div>
-        <Flame className="h-6 w-6 text-[#ff2d55]" aria-hidden="true" />
+        <Flame className="h-6 w-6 text-[#ff2d55]" />
       </div>
       <div className="grid gap-3 xl:grid-cols-5">
         {PIPELINE_STAGES.map((stage) => {
-          const stageLeads = filteredLeads.filter((lead) => lead.pipeline_stage === stage);
+          const stageLeads = filteredLeads.filter((l) => l.pipeline_stage === stage);
+          const stageRevenue = stageLeads.reduce((s, l) => s + Number(l.deal_value || 0), 0);
           return (
             <div
               key={stage}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => onDropStage(event, stage)}
-              className="min-h-[280px] rounded-lg border border-white/10 bg-black/25 p-3"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => onDropStage(e, stage)}
+              className="min-h-[260px] rounded-2xl border border-white/[0.08] bg-white/[0.03] p-3"
+              style={{ borderTop: `2px solid ${stageColor(stage)}` }}
             >
               <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="text-sm font-black text-white">{stage}</h3>
-                <span className="rounded-full bg-white/10 px-2 py-1 text-xs font-black text-white/60">{stageLeads.length}</span>
+                <h3 className="text-sm font-black" style={{ color: stageColor(stage) }}>{stage}</h3>
+                <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-black text-white/50">{stageLeads.length}</span>
               </div>
-              <div className="space-y-3">
+              {stageRevenue > 0 && (
+                <p className="mb-2 text-[11px] font-black text-white/35">${stageRevenue.toLocaleString()}</p>
+              )}
+              <div className="space-y-2">
                 {stageLeads.map((lead) => (
-                  <article
+                  <button
                     key={lead.id}
+                    type="button"
                     draggable
-                    onDragStart={(event) => onDragStart(event, lead)}
-                    className="w-full rounded-lg border border-white/10 bg-white/[0.06] p-3 text-left transition hover:border-[#00f5d4]/50"
+                    onDragStart={(e) => onDragStart(e, lead)}
+                    onClick={() => onSelect(lead.id)}
+                    className="w-full rounded-xl border border-white/[0.07] bg-white/[0.05] p-3 text-left transition hover:border-white/20"
                   >
-                    <button type="button" onClick={() => onSelect(lead.id)} className="w-full text-left">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <LeadAvatar lead={lead} className="h-9 w-9 rounded-md" textClassName="text-xs" />
-                          <span className="truncate text-sm font-black text-white">{lead.name}</span>
-                        </div>
-                        <span className="text-xs font-black text-[#00f5d4]">{lead.ai_score ? Number(lead.ai_score).toFixed(1) : "NA"}</span>
-                      </div>
-                      <div className="mt-1 truncate text-xs text-white/45">{lead.niche || visibleHandle(lead)}</div>
-                    </button>
-                    <div className="mt-3">
-                      <LeadLinkButtons lead={lead} compact limit={3} />
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm font-black text-white">{lead.name}</span>
+                      {lead.ai_score > 0 && <span className="text-xs font-black" style={{ color: scoreColor(Number(lead.ai_score)) }}>{Number(lead.ai_score).toFixed(1)}</span>}
                     </div>
-                  </article>
+                    <div className="mt-1 truncate text-xs text-white/40">{lead.niche || visibleHandle(lead)}</div>
+                    {Number(lead.deal_value || 0) > 0 && (
+                      <div className="mt-1.5 text-xs font-black text-[#16ff7a]">${Number(lead.deal_value).toLocaleString()}</div>
+                    )}
+                  </button>
                 ))}
               </div>
             </div>
@@ -849,58 +824,57 @@ function PipelineView({ leads, filteredLeads, onDragStart, onDropStage, onSelect
   );
 }
 
+// ─── main app ────────────────────────────────────────────────────────────────
+
 export default function ShortsAgencyOS() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const [session, setSession] = useState(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authMessage, setAuthMessage] = useState("");
-  const [leads, setLeads] = useState(initialLeads);
-  const [selectedLeadId, setSelectedLeadId] = useState(null);
-  const [likedLeadIds, setLikedLeadIds] = useState([]);
+  const [leads, setLeads] = useState(seedLeads);
+  const [selectedLeadId, setSelectedLeadId] = useState(seedLeads[0].id);
   const [view, setView] = useState("feed");
   const [source, setSource] = useState("auto");
   const [keyword, setKeyword] = useState("business podcast");
   const [city, setCity] = useState("Austin");
-  const [category, setCategory] = useState("fitness studio");
-  const [manualText, setManualText] = useState("");
+  const [manualText, setManualText] = useState("@founderslabpod\nhttps://x.com/mayaopsdaily");
   const [searchResults, setSearchResults] = useState([]);
   const [saveResults, setSaveResults] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const [filters, setFilters] = useState({ niche: "", platform: "all", minScore: 0 });
+  const [hotOnly, setHotOnly] = useState(false);
+  const [nicheFilter, setNicheFilter] = useState("");
   const [messagePanel, setMessagePanel] = useState(null);
+  const [dealValueModal, setDealValueModal] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [toast, setToast] = useState("");
 
-  const liveLeads = useMemo(() => withoutPlaceholderLeads(leads), [leads]);
-  const selectedLead = liveLeads.find((lead) => lead.id === selectedLeadId) || liveLeads[0];
+  function showToast(msg) {
+    setToast(msg);
+    setTimeout(() => setToast(""), 2500);
+  }
 
   useEffect(() => {
     if (!supabase) return;
-
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session || null);
       if (data.session) loadLeads(data.session);
     });
-
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession);
-      if (nextSession) loadLeads(nextSession);
+    const { data } = supabase.auth.onAuthStateChange((_e, s) => {
+      setSession(s);
+      if (s) loadLeads(s);
     });
-
     return () => data.subscription.unsubscribe();
   }, [supabase]);
 
   async function request(path, options = {}) {
-    const response = await fetch(path, {
+    const res = await fetch(path, {
       ...options,
-      headers: {
-        "content-type": "application/json",
-        ...authHeaders(session),
-        ...(options.headers || {})
-      }
+      headers: { "content-type": "application/json", ...authHeaders(session), ...(options.headers || {}) }
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Request failed.");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Request failed.");
     return data;
   }
 
@@ -908,369 +882,259 @@ export default function ShortsAgencyOS() {
     if (!activeSession) return;
     try {
       setBusy("load");
-      const response = await fetch("/api/leads", {
-        headers: authHeaders(activeSession)
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not load leads.");
-      const nextLeads = withoutPlaceholderLeads(data.leads || []);
-      setLeads(nextLeads);
-      setSelectedLeadId(nextLeads[0]?.id || null);
-    } catch (loadError) {
-      setError(loadError.message);
-    } finally {
-      setBusy("");
-    }
+      const res = await fetch("/api/leads", { headers: authHeaders(activeSession) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not load leads.");
+      if (data.leads?.length) { setLeads(data.leads); setSelectedLeadId(data.leads[0].id); }
+    } catch (e) { setError(e.message); } finally { setBusy(""); }
   }
 
   async function signIn() {
     if (!supabase) return;
     setAuthMessage("");
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-    setAuthMessage(signInError ? signInError.message : "Signed in.");
+    const { error: e } = await supabase.auth.signInWithPassword({ email, password });
+    setAuthMessage(e ? e.message : "Signed in.");
   }
 
   async function signUp() {
     if (!supabase) return;
     setAuthMessage("");
-    const { error: signUpError } = await supabase.auth.signUp({ email, password });
-    setAuthMessage(signUpError ? signUpError.message : "Account created. Check your email if confirmations are enabled.");
+    const { error: e } = await supabase.auth.signUp({ email, password });
+    setAuthMessage(e ? e.message : "Account created. Check your email.");
   }
 
   async function signOut() {
     if (!supabase) return;
     await supabase.auth.signOut();
     setSession(null);
-    setLeads(initialLeads);
-    setSelectedLeadId(null);
+    setLeads(seedLeads);
+    setSelectedLeadId(seedLeads[0].id);
   }
 
   function mergeLead(nextLead) {
-    setLeads((current) => {
-      const exists = current.some((lead) => lead.id === nextLead.id);
-      return exists ? current.map((lead) => (lead.id === nextLead.id ? { ...lead, ...nextLead } : lead)) : [nextLead, ...current];
+    setLeads((cur) => {
+      const exists = cur.some((l) => l.id === nextLead.id);
+      return exists ? cur.map((l) => (l.id === nextLead.id ? { ...l, ...nextLead } : l)) : [nextLead, ...cur];
     });
     setSelectedLeadId(nextLead.id);
+  }
+
+  function removeLead(leadId) {
+    setLeads((cur) => cur.filter((l) => l.id !== leadId));
+    setSelectedLeadId((cur) => cur === leadId ? leads.find((l) => l.id !== leadId)?.id || null : cur);
   }
 
   async function addLead(lead) {
     try {
       if (session) {
-        const data = await request("/api/leads", {
-          method: "POST",
-          body: JSON.stringify(lead)
-        });
+        const data = await request("/api/leads", { method: "POST", body: JSON.stringify(lead) });
         mergeLead(data.lead);
       } else {
-        mergeLead({
-          ...lead,
-          id: crypto.randomUUID(),
-          created_at: new Date().toISOString(),
-          pipeline_stage: "Prospect",
-          outreach_statuses: []
-        });
+        mergeLead({ ...lead, id: crypto.randomUUID(), created_at: new Date().toISOString(), pipeline_stage: "Prospect", outreach_statuses: [] });
       }
       setView("feed");
-    } catch (addError) {
-      setError(addError.message);
-    }
+    } catch (e) { setError(e.message); }
   }
 
-  async function runLeadSearch(event) {
-    event.preventDefault();
+  async function deleteLead(lead) {
+    if (session) {
+      try { await request(`/api/leads/${lead.id}`, { method: "DELETE" }); } catch (e) { setError(e.message); return; }
+    }
+    removeLead(lead.id);
+    setDeleteConfirm(null);
+    showToast("Lead removed.");
+  }
+
+  async function runLeadSearch(e) {
+    e.preventDefault();
     setError("");
     setMessagePanel(null);
     setBusy("search");
-
     try {
-      const endpoint =
-        source === "auto"
-          ? "/api/leads/autopilot"
-          : source === "youtube"
-          ? "/api/leads/search/youtube"
-          : source === "instagram"
-            ? "/api/leads/search/instagram"
-            : source === "maps"
-              ? "/api/leads/search/maps"
-              : "/api/leads/import";
+      const endpoint = source === "auto" ? "/api/leads/autopilot"
+        : source === "youtube" ? "/api/leads/search/youtube"
+        : source === "instagram" ? "/api/leads/search/instagram"
+        : source === "maps" ? "/api/leads/search/maps"
+        : "/api/leads/import";
 
-      const body =
-        source === "auto"
-          ? { keyword, category: keyword, city, save: saveResults, includeFiltered: true }
-          : source === "maps"
-          ? { category, city, save: saveResults }
-          : source === "manual"
-            ? { text: manualText, niche: keyword, save: saveResults }
-            : { keyword, save: saveResults };
+      const body = source === "auto" ? { keyword, category: keyword, city, save: saveResults, includeFiltered: true }
+        : source === "maps" ? { category: keyword, city, save: saveResults }
+        : source === "manual" ? { text: manualText, niche: keyword, save: saveResults }
+        : { keyword, save: saveResults };
 
-      const data = await request(endpoint, {
-        method: "POST",
-        body: JSON.stringify(body)
-      });
-
+      const data = await request(endpoint, { method: "POST", body: JSON.stringify(body) });
       const saved = data.saved || [];
-      if (saved.length) {
-        saved.forEach(mergeLead);
-        setSearchResults(saved);
-      } else {
-        setSearchResults(data.leads || []);
-      }
-    } catch (searchError) {
-      setError(searchError.message);
-    } finally {
-      setBusy("");
-    }
+      if (saved.length) { saved.forEach(mergeLead); setSearchResults(saved); }
+      else setSearchResults(data.leads || []);
+    } catch (e) { setError(e.message); } finally { setBusy(""); }
   }
 
   async function scoreLead(lead) {
     setBusy(`score-${lead.id}`);
     setError("");
     try {
-      const data = await request("/api/ai/score", {
-        method: "POST",
-        body: JSON.stringify({ lead })
-      });
+      const data = await request("/api/ai/score", { method: "POST", body: JSON.stringify({ lead }) });
       mergeLead(data.lead);
-    } catch (scoreError) {
-      setError(scoreError.message);
-    } finally {
-      setBusy("");
+    } catch (e) { setError(e.message); } finally { setBusy(""); }
+  }
+
+  async function scoreAllHot() {
+    const toScore = leads.filter((l) => !l.ai_score || l.ai_score === 0);
+    if (!toScore.length) { showToast("All leads already scored."); return; }
+    setBusy("score-all");
+    for (const lead of toScore) {
+      try {
+        const data = await request("/api/ai/score", { method: "POST", body: JSON.stringify({ lead }) });
+        mergeLead(data.lead);
+      } catch {}
     }
+    setBusy("");
+    showToast(`Scored ${toScore.length} leads.`);
   }
 
   async function generateMessage(lead, platform, followUp = false) {
+    const score = Number(lead.ai_score || 0);
+    if (score > 0 && score < SCORE_THRESHOLD) {
+      setError(`${lead.name} scored ${score.toFixed(1)} — below ${SCORE_THRESHOLD} threshold. Re-score or pass.`);
+      return;
+    }
     setBusy(`message-${lead.id}-${platform}`);
     setError("");
     try {
-      const data = await request("/api/ai/message", {
-        method: "POST",
-        body: JSON.stringify({ lead, platform, followUp })
-      });
+      const data = await request("/api/ai/message", { method: "POST", body: JSON.stringify({ lead, platform, followUp }) });
       setMessagePanel({ lead, platform, ...data, followUp });
       setView("dms");
-    } catch (messageError) {
-      setError(messageError.message);
-    } finally {
-      setBusy("");
-    }
+    } catch (e) { setError(e.message); } finally { setBusy(""); }
   }
 
   async function copyMessage(text) {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const textarea = document.createElement("textarea");
-        textarea.value = text;
-        textarea.setAttribute("readonly", "");
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
-      }
-      setAuthMessage("Copied.");
-    } catch {
-      setAuthMessage("Copy failed. Select the message text manually.");
-    }
+    if (!navigator.clipboard) return;
+    await navigator.clipboard.writeText(text);
+    showToast("Copied to clipboard.");
   }
 
   async function changeStatus(lead, platform, status, extra = {}) {
     const nextLead = upsertStatus(lead, platform, status, extra);
     mergeLead(nextLead);
-
     if (!session) return;
-
     try {
       await request(`/api/leads/${lead.id}`, {
         method: "PATCH",
-        body: JSON.stringify({
-          outreach: { platform, status, extra },
-          lead: { pipeline_stage: nextLead.pipeline_stage }
-        })
+        body: JSON.stringify({ outreach: { platform, status, extra }, lead: { pipeline_stage: nextLead.pipeline_stage } })
       });
-    } catch (statusError) {
-      setError(statusError.message);
-    }
+    } catch (e) { setError(e.message); }
   }
 
   async function moveStage(lead, stage) {
     mergeLead({ ...lead, pipeline_stage: stage });
-    if (!session) return;
-
-    try {
-      await request(`/api/leads/${lead.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ lead: { pipeline_stage: stage } })
-      });
-    } catch (moveError) {
-      setError(moveError.message);
+    if ((stage === "Booked" || stage === "Closed") && Number(lead.deal_value || 0) === 0) {
+      setDealValueModal({ lead: { ...lead, pipeline_stage: stage }, stage });
     }
+    if (!session) return;
+    try { await request(`/api/leads/${lead.id}`, { method: "PATCH", body: JSON.stringify({ lead: { pipeline_stage: stage } }) }); }
+    catch (e) { setError(e.message); }
   }
 
   async function updateDealValue(lead, value) {
     const dealValue = Number(value || 0);
     mergeLead({ ...lead, deal_value: dealValue });
     if (!session) return;
+    try { await request(`/api/leads/${lead.id}`, { method: "PATCH", body: JSON.stringify({ lead: { deal_value: dealValue } }) }); }
+    catch (e) { setError(e.message); }
+  }
 
-    try {
-      await request(`/api/leads/${lead.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ lead: { deal_value: dealValue } })
-      });
-    } catch (dealError) {
-      setError(dealError.message);
-    }
+  async function saveNote(lead, note) {
+    mergeLead({ ...lead, notes: note });
+    if (!session) return;
+    try { await request(`/api/leads/${lead.id}`, { method: "PATCH", body: JSON.stringify({ lead: { notes: note } }) }); }
+    catch (e) { setError(e.message); }
   }
 
   async function runDueFollowups() {
     setBusy("followups");
     setError("");
     try {
-      const data = await request("/api/followups/due", {
-        method: "POST",
-        body: JSON.stringify({})
-      });
+      const data = await request("/api/followups/due", { method: "POST", body: JSON.stringify({}) });
       if (data.generated?.[0]) {
-        setMessagePanel({
-          lead: data.generated[0].lead,
-          platform: data.generated[0].platform,
-          message: data.generated[0].message,
-          provider: data.generated[0].provider,
-          followUp: true
-        });
+        setMessagePanel({ lead: data.generated[0].lead, platform: data.generated[0].platform, message: data.generated[0].message, provider: data.generated[0].provider, followUp: true });
       }
-      setAuthMessage(`${data.generated?.length || 0} due follow-ups generated.`);
+      showToast(`${data.generated?.length || 0} follow-ups generated.`);
       if (session) loadLeads();
-    } catch (followupError) {
-      setError(followupError.message);
-    } finally {
-      setBusy("");
-    }
+    } catch (e) { setError(e.message); } finally { setBusy(""); }
   }
 
-  function onDragStart(event, lead) {
-    event.dataTransfer.setData("text/plain", lead.id);
-  }
-
-  function onDropStage(event, stage) {
-    event.preventDefault();
-    const leadId = event.dataTransfer.getData("text/plain");
-    const lead = liveLeads.find((item) => item.id === leadId);
+  function onDragStart(e, lead) { e.dataTransfer.setData("text/plain", lead.id); }
+  function onDropStage(e, stage) {
+    e.preventDefault();
+    const lead = leads.find((l) => l.id === e.dataTransfer.getData("text/plain"));
     if (lead) moveStage(lead, stage);
-  }
-
-  function toggleLike(leadId) {
-    setLikedLeadIds((current) => (current.includes(leadId) ? current.filter((id) => id !== leadId) : [...current, leadId]));
   }
 
   function selectByOffset(offset) {
     if (!filteredLeads.length) return;
-    const currentIndex = Math.max(0, filteredLeads.findIndex((lead) => lead.id === selectedLeadId));
-    const nextIndex = (currentIndex + offset + filteredLeads.length) % filteredLeads.length;
-    setSelectedLeadId(filteredLeads[nextIndex].id);
+    const idx = Math.max(0, filteredLeads.findIndex((l) => l.id === selectedLeadId));
+    setSelectedLeadId(filteredLeads[(idx + offset + filteredLeads.length) % filteredLeads.length].id);
   }
 
-  function passLead(lead) {
-    moveStage(lead, "Prospect");
-    selectByOffset(1);
-  }
+  function passLead(lead) { moveStage(lead, "Prospect"); selectByOffset(1); }
 
-  const filteredLeads = liveLeads.filter((lead) => {
-    const matchesNiche = !filters.niche || (lead.niche || "").toLowerCase().includes(filters.niche.toLowerCase());
-    const matchesPlatform =
-      filters.platform === "all" ||
-      (filters.platform === "instagram" && lead.instagram_handle) ||
-      (filters.platform === "youtube" && lead.youtube_url) ||
-      (filters.platform === "x" && lead.x_handle) ||
-      (filters.platform === "email" && lead.email);
-    const matchesScore = Number(lead.ai_score || 0) >= Number(filters.minScore || 0);
-    return matchesNiche && matchesPlatform && matchesScore;
+  const filteredLeads = leads.filter((lead) => {
+    const matchesNiche = !nicheFilter || (lead.niche || "").toLowerCase().includes(nicheFilter.toLowerCase());
+    const matchesHot = !hotOnly || Number(lead.ai_score || 0) >= SCORE_THRESHOLD;
+    return matchesNiche && matchesHot;
   });
 
-  const activeLead = filteredLeads.find((lead) => lead.id === selectedLeadId) || filteredLeads[0] || selectedLead;
-  const activeIndex = Math.max(0, filteredLeads.findIndex((lead) => lead.id === activeLead?.id));
+  const activeLead = filteredLeads.find((l) => l.id === selectedLeadId) || filteredLeads[0];
+  const activeIndex = Math.max(0, filteredLeads.findIndex((l) => l.id === activeLead?.id));
 
   useEffect(() => {
-    function onKeyDown(event) {
-      const tag = event.target?.tagName?.toLowerCase();
+    function onKeyDown(e) {
+      const tag = e.target?.tagName?.toLowerCase();
       if (["input", "textarea", "select"].includes(tag)) return;
-
-      if (event.key === "ArrowDown" || event.key === "ArrowRight") {
-        event.preventDefault();
-        selectByOffset(1);
-      }
-
-      if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
-        event.preventDefault();
-        selectByOffset(-1);
-      }
-
-      if (event.key.toLowerCase() === "l" && activeLead) {
-        toggleLike(activeLead.id);
-      }
-
-      if (event.key.toLowerCase() === "m" && activeLead) {
-        generateMessage(activeLead, primaryPlatform(activeLead));
-      }
-
-      if (event.key.toLowerCase() === "s" && activeLead) {
-        scoreLead(activeLead);
-      }
+      if (e.key === "ArrowDown" || e.key === "ArrowRight") { e.preventDefault(); selectByOffset(1); }
+      if (e.key === "ArrowUp" || e.key === "ArrowLeft") { e.preventDefault(); selectByOffset(-1); }
+      if (e.key.toLowerCase() === "m" && activeLead) generateMessage(activeLead, primaryPlatform(activeLead));
+      if (e.key.toLowerCase() === "s" && activeLead) scoreLead(activeLead);
     }
-
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [activeLead, selectedLeadId, filteredLeads.length]);
 
-  const statuses = liveLeads.flatMap((lead) => getStatuses(lead));
-  const sent = statuses.filter((item) => ["Sent", "Replied", "Booked", "Closed"].includes(item.status)).length;
-  const replies = statuses.filter((item) => ["Replied", "Booked", "Closed"].includes(item.status)).length;
-  const booked = statuses.filter((item) => ["Booked", "Closed"].includes(item.status)).length;
-  const month = new Date().getMonth();
-  const monthlyRevenue = liveLeads
-    .filter((lead) => new Date(lead.created_at || Date.now()).getMonth() === month)
-    .reduce((sum, lead) => sum + Number(lead.deal_value || 0), 0);
-  const dueFollowups = liveLeads.filter((lead) =>
-    getStatuses(lead).some(
-      (status) =>
-        status.status === "Sent" &&
-        status.next_follow_up_at &&
-        new Date(status.next_follow_up_at).getTime() <= Date.now()
-    )
-  );
-  const hotLeads = [...liveLeads].sort((a, b) => Number(b.ai_score || 0) - Number(a.ai_score || 0)).slice(0, 4);
+  // analytics
+  const statuses = leads.flatMap(getStatuses);
+  const sent = statuses.filter((s) => ["Sent", "Replied", "Booked", "Closed"].includes(s.status)).length;
+  const replies = statuses.filter((s) => ["Replied", "Booked", "Closed"].includes(s.status)).length;
+  const replyRate = sent > 0 ? Math.round((replies / sent) * 100) : 0;
+  const closedRevenue = leads.filter((l) => l.pipeline_stage === "Closed").reduce((s, l) => s + Number(l.deal_value || 0), 0);
+  const hotCount = leads.filter((l) => Number(l.ai_score || 0) >= SCORE_THRESHOLD).length;
+  const dueFollowups = leads.filter((l) => getStatuses(l).some((s) => s.status === "Sent" && s.next_follow_up_at && new Date(s.next_follow_up_at) <= new Date()));
+  const unscoredCount = leads.filter((l) => !l.ai_score || l.ai_score === 0).length;
 
   return (
-    <main className="min-h-screen bg-[#070707] px-4 pb-28 pt-4 text-white sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-[#060606] px-4 pb-28 pt-4 text-white sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1480px] space-y-5">
-        <header className="sticky top-0 z-30 -mx-4 border-b border-white/10 bg-[#070707]/90 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+
+        {/* header */}
+        <header className="sticky top-0 z-30 -mx-4 border-b border-white/[0.07] bg-[#060606]/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
           <div className="mx-auto flex max-w-[1480px] items-center justify-between gap-4">
-            <button type="button" onClick={() => setView("feed")} className="flex min-w-0 items-center gap-3 text-left">
-              <div className="grid h-11 w-11 place-items-center rounded-lg bg-[#ff2d55] text-white shadow-[0_0_28px_rgba(255,45,85,0.4)]">
-                <Zap className="h-5 w-5" aria-hidden="true" />
+            <button type="button" onClick={() => setView("feed")} className="flex min-w-0 items-center gap-3">
+              <div className="grid h-10 w-10 place-items-center rounded-xl bg-[#ff2d55] shadow-[0_0_24px_rgba(255,45,85,0.5)]">
+                <Zap className="h-5 w-5 text-white" />
               </div>
-              <div className="min-w-0">
-                <div className="truncate text-lg font-black leading-5">Shorts Agency OS</div>
-                <div className="truncate text-xs font-bold text-white/45">fast outreach workspace</div>
+              <div className="min-w-0 hidden sm:block">
+                <div className="text-base font-black leading-none">Shorts Agency OS</div>
+                <div className="mt-0.5 text-[11px] text-white/35">outreach workspace</div>
               </div>
             </button>
 
-            <nav className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] p-1 md:flex">
+            <nav className="hidden items-center gap-1 rounded-2xl border border-white/[0.07] bg-white/[0.04] p-1 md:flex">
               {navItems.map((item) => {
                 const Icon = item.icon;
                 return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setView(item.id)}
-                    className={clsx(
-                      "inline-flex h-10 items-center gap-2 rounded-full px-4 text-sm font-black transition",
-                      view === item.id ? "bg-white text-black" : "text-white/65 hover:text-white"
-                    )}
-                  >
-                    <Icon className="h-4 w-4" aria-hidden="true" />
+                  <button key={item.id} type="button" onClick={() => setView(item.id)}
+                    className={clsx("inline-flex h-9 items-center gap-2 rounded-xl px-4 text-sm font-black transition",
+                      view === item.id ? "bg-white text-black" : "text-white/50 hover:text-white")}>
+                    <Icon className="h-4 w-4" />
                     {item.label}
                   </button>
                 );
@@ -1278,71 +1142,55 @@ export default function ShortsAgencyOS() {
             </nav>
 
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => (session ? loadLeads() : setAuthMessage("Sign in to sync saved leads."))}
-                className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-white/[0.06] text-white"
-                title={session ? "Refresh" : "Sign in to sync"}
-              >
-                <RefreshCw className={clsx("h-4 w-4", busy === "load" && "animate-spin")} aria-hidden="true" />
+              {unscoredCount > 0 && (
+                <button type="button" onClick={scoreAllHot} disabled={busy === "score-all"} title={`Score ${unscoredCount} unscored leads`}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.06] px-3 text-xs font-black text-white/70 hover:text-white disabled:opacity-50">
+                  <Sparkles className={clsx("h-3.5 w-3.5", busy === "score-all" && "animate-spin")} />
+                  Score all ({unscoredCount})
+                </button>
+              )}
+              <button type="button" onClick={() => session && loadLeads()} className="grid h-9 w-9 place-items-center rounded-xl border border-white/[0.07] bg-white/[0.04] text-white/50 hover:text-white">
+                <RefreshCw className={clsx("h-4 w-4", busy === "load" && "animate-spin")} />
               </button>
-              <button
-                type="button"
-                onClick={() => setView("hunt")}
-                className="inline-flex h-10 items-center gap-2 rounded-full bg-[#00f5d4] px-4 text-sm font-black text-black"
-              >
-                <Plus className="h-4 w-4" aria-hidden="true" />
+              <button type="button" onClick={() => setView("hunt")} className="inline-flex h-9 items-center gap-2 rounded-xl bg-[#00f5d4] px-4 text-sm font-black text-black">
+                <Plus className="h-4 w-4" />
                 Find
               </button>
             </div>
           </div>
         </header>
 
+        {/* error */}
         {error ? (
-          <div className="flex items-start gap-3 rounded-lg border border-[#ff2d55]/40 bg-[#ff2d55]/10 p-4 text-sm text-white">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#ff2d55]" aria-hidden="true" />
-            <span>{error}</span>
+          <div className="flex items-start gap-3 rounded-2xl border border-[#ff2d55]/30 bg-[#ff2d55]/[0.08] p-4 text-sm text-white">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#ff2d55]" />
+            <span className="flex-1">{error}</span>
+            <button type="button" onClick={() => setError("")} className="text-white/40 hover:text-white"><X className="h-4 w-4" /></button>
           </div>
         ) : null}
 
+        {/* KPIs */}
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <MiniMetric icon={Flame} label="Leads" value={liveLeads.length} />
-          <MiniMetric icon={Send} label="Messages Sent" value={sent} />
-          <MiniMetric icon={MessageCircle} label="Replies" value={replies} />
-          <MiniMetric icon={DollarSign} label="Revenue" value={`$${monthlyRevenue.toLocaleString()}`} />
+          <MiniMetric icon={Flame} label="Hot Leads" value={hotCount} accent="#00f5d4" />
+          <MiniMetric icon={Send} label="Sent" value={sent} />
+          <MiniMetric icon={MessageCircle} label="Reply Rate" value={`${replyRate}%`} accent={replyRate >= 20 ? "#00f5d4" : replyRate >= 10 ? "#ffb703" : "#ff2d55"} />
+          <MiniMetric icon={DollarSign} label="Closed Revenue" value={`$${closedRevenue.toLocaleString()}`} accent={closedRevenue > 0 ? "#16ff7a" : "white"} />
         </section>
 
+        {/* feed */}
         {view === "feed" ? (
-          <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
             <div className="space-y-4">
+              {/* filters */}
               <div className="flex flex-wrap items-center gap-2">
-                <input
-                  value={filters.niche}
-                  onChange={(event) => setFilters((current) => ({ ...current, niche: event.target.value }))}
-                  placeholder="Search niche"
-                  className="h-11 min-w-[220px] flex-1 rounded-full border border-white/10 bg-white/[0.06] px-4 text-sm font-bold text-white placeholder:text-white/35"
-                />
-                <select
-                  value={filters.platform}
-                  onChange={(event) => setFilters((current) => ({ ...current, platform: event.target.value }))}
-                  className="h-11 rounded-full border border-white/10 bg-white/[0.06] px-4 text-sm font-black text-white"
-                >
-                  <option value="all">All</option>
-                  <option value="instagram">IG</option>
-                  <option value="youtube">YT</option>
-                  <option value="x">X</option>
-                  <option value="email">Email</option>
-                </select>
-                <select
-                  value={filters.minScore}
-                  onChange={(event) => setFilters((current) => ({ ...current, minScore: Number(event.target.value) }))}
-                  className="h-11 rounded-full border border-white/10 bg-white/[0.06] px-4 text-sm font-black text-white"
-                >
-                  <option value={0}>Any score</option>
-                  <option value={6}>6+</option>
-                  <option value={8}>8+</option>
-                  <option value={9}>9+</option>
-                </select>
+                <input value={nicheFilter} onChange={(e) => setNicheFilter(e.target.value)} placeholder="Filter by niche..."
+                  className="h-10 min-w-[200px] flex-1 rounded-xl border border-white/[0.07] bg-white/[0.04] px-4 text-sm text-white placeholder:text-white/30" />
+                <button type="button" onClick={() => setHotOnly((v) => !v)}
+                  className={clsx("inline-flex h-10 items-center gap-2 rounded-xl border px-4 text-sm font-black transition",
+                    hotOnly ? "border-[#00f5d4] bg-[#00f5d4] text-black" : "border-white/[0.07] bg-white/[0.04] text-white/60 hover:text-white")}>
+                  <Flame className="h-4 w-4" />
+                  Hot only
+                </button>
               </div>
 
               {activeLead ? (
@@ -1350,10 +1198,9 @@ export default function ShortsAgencyOS() {
                   lead={activeLead}
                   index={activeIndex}
                   total={filteredLeads.length}
-                  liked={likedLeadIds.includes(activeLead.id)}
                   busy={busy}
-                  onLike={toggleLike}
                   onPass={passLead}
+                  onDelete={(lead) => setDeleteConfirm(lead)}
                   onNext={() => selectByOffset(1)}
                   onPrevious={() => selectByOffset(-1)}
                   onScore={scoreLead}
@@ -1361,126 +1208,74 @@ export default function ShortsAgencyOS() {
                   onStatus={changeStatus}
                   onStage={moveStage}
                   onDealValue={updateDealValue}
+                  onNoteSave={saveNote}
                 />
               ) : (
-                <div className="rounded-lg border border-dashed border-white/15 p-8 text-center">
-                  <div className="text-xl font-black text-white">{liveLeads.length ? "No leads match your filters" : "No leads yet"}</div>
-                  <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-white/50">
-                    {liveLeads.length
-                      ? "Clear the filters or lower the score threshold."
-                      : "Run the automated finder to pull real prospects from YouTube, Instagram, and Maps."}
-                  </p>
-                  {!liveLeads.length ? (
-                    <button
-                      type="button"
-                      onClick={() => setView("hunt")}
-                      className="mt-5 inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#00f5d4] px-5 text-sm font-black text-black"
-                    >
-                      <Search className="h-4 w-4" aria-hidden="true" />
-                      Find leads
-                    </button>
-                  ) : null}
+                <div className="rounded-2xl border border-dashed border-white/10 p-12 text-center text-white/35">
+                  {hotOnly ? "No hot leads — lower the filter or score more leads." : "No leads. Hit Find to pull some."}
                 </div>
               )}
             </div>
 
             <aside className="space-y-4">
-              <AuthStrip
-                supabase={supabase}
-                session={session}
-                email={email}
-                password={password}
-                setEmail={setEmail}
-                setPassword={setPassword}
-                onSignIn={signIn}
-                onSignUp={signUp}
-                onSignOut={signOut}
-                message={authMessage}
-              />
+              <AuthStrip supabase={supabase} session={session} email={email} password={password} setEmail={setEmail} setPassword={setPassword} onSignIn={signIn} onSignUp={signUp} onSignOut={signOut} message={authMessage} />
 
-              <div className="rounded-lg border border-white/10 bg-white/[0.06] p-4">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <h2 className="text-sm font-black uppercase tracking-wide text-white/80">Queue</h2>
-                  <span className="text-xs font-black text-white/45">{filteredLeads.length} cards</span>
+              <div className="rounded-2xl border border-white/[0.07] bg-white/[0.03] p-4">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <h2 className="text-sm font-black uppercase tracking-widest text-white/50">Queue</h2>
+                  <span className="text-xs font-black text-white/30">{filteredLeads.length}</span>
                 </div>
-                <LeadStrip leads={filteredLeads} selectedLeadId={activeLead?.id} likedLeadIds={likedLeadIds} onSelect={setSelectedLeadId} />
+                <LeadStrip leads={filteredLeads} selectedLeadId={activeLead?.id} onSelect={setSelectedLeadId} />
               </div>
 
-              <div className="rounded-lg border border-white/10 bg-white/[0.06] p-4">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <h2 className="text-sm font-black uppercase tracking-wide text-white/80">Follow-ups</h2>
-                  <span className="rounded-full bg-[#ff2d55] px-2 py-1 text-xs font-black text-white">{dueFollowups.length}</span>
+              {dueFollowups.length > 0 && (
+                <div className="rounded-2xl border border-[#ffb703]/20 bg-[#ffb703]/[0.06] p-4">
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <CalendarClock className="h-4 w-4 text-[#ffb703]" />
+                      <h2 className="text-sm font-black text-[#ffb703]">Follow-ups due</h2>
+                    </div>
+                    <span className="rounded-full bg-[#ffb703] px-2 py-0.5 text-xs font-black text-black">{dueFollowups.length}</span>
+                  </div>
+                  <button type="button" onClick={runDueFollowups} disabled={!session || busy === "followups"}
+                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#ffb703] text-sm font-black text-black disabled:opacity-40">
+                    {busy === "followups" ? "Generating..." : "Generate follow-ups"}
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={runDueFollowups}
-                  disabled={!session || busy === "followups"}
-                  className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-white text-sm font-black text-black disabled:opacity-45"
-                >
-                  <CalendarClock className="h-4 w-4" aria-hidden="true" />
-                  Generate
-                </button>
-              </div>
+              )}
             </aside>
           </section>
         ) : null}
 
         {view === "hunt" ? (
-          <FinderPanel
-            source={source}
-            setSource={setSource}
-            keyword={keyword}
-            setKeyword={setKeyword}
-            city={city}
-            setCity={setCity}
-            category={category}
-            setCategory={setCategory}
-            manualText={manualText}
-            setManualText={setManualText}
-            saveResults={saveResults}
-            setSaveResults={setSaveResults}
-            searchResults={searchResults}
-            busy={busy}
-            onSubmit={runLeadSearch}
-            onAdd={addLead}
-          />
+          <FinderPanel source={source} setSource={setSource} keyword={keyword} setKeyword={setKeyword} city={city} setCity={setCity} manualText={manualText} setManualText={setManualText} saveResults={saveResults} setSaveResults={setSaveResults} searchResults={searchResults} busy={busy} onSubmit={runLeadSearch} onAdd={addLead} />
         ) : null}
 
         {view === "dms" ? (
-          <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
-            <MessagePanel
-              messagePanel={messagePanel}
-              onCopy={copyMessage}
-              onClose={() => setMessagePanel(null)}
-              onMarkSent={(lead, platform, message) => changeStatus(lead, platform, "Sent", { last_message: message })}
-            />
-            <div className="space-y-3">
-              {liveLeads.map((lead) => {
+          <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+            <MessagePanel messagePanel={messagePanel} onCopy={copyMessage} onClose={() => setMessagePanel(null)} onMarkSent={(lead, platform, message) => changeStatus(lead, platform, "Sent", { last_message: message })} />
+            <div className="space-y-2">
+              <p className="text-[11px] font-black uppercase tracking-widest text-white/30">All leads — click to generate</p>
+              {leads.map((lead) => {
                 const platform = primaryPlatform(lead);
+                const score = Number(lead.ai_score || 0);
+                const isHot = score >= SCORE_THRESHOLD || score === 0;
                 return (
-                  <article
-                    key={lead.id}
-                    className="flex w-full items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.06] p-3 text-left"
+                  <button key={lead.id} type="button" onClick={() => generateMessage(lead, platform)}
+                    className={clsx("flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left transition",
+                      isHot ? "border-white/[0.07] bg-white/[0.03] hover:border-white/15" : "border-white/[0.04] bg-white/[0.02] opacity-50 cursor-not-allowed")}
+                    disabled={!isHot}
+                    title={!isHot ? `Score ${score.toFixed(1)} — below threshold` : undefined}
                   >
-                    <button type="button" onClick={() => generateMessage(lead, platform)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-                      <LeadAvatar lead={lead} className="h-10 w-10 rounded-md" textClassName="text-xs" />
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-black text-white">{lead.name}</div>
-                        <div className="truncate text-xs text-white/45">{platformName(platform)} . {visibleHandle(lead)}</div>
-                      </div>
-                    </button>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <LeadLinkButtons lead={lead} compact limit={2} />
-                      <button
-                        type="button"
-                        onClick={() => generateMessage(lead, platform)}
-                        className="grid h-9 w-9 place-items-center rounded-md bg-[#00f5d4] text-black"
-                        title="Generate message"
-                      >
-                        <Send className="h-4 w-4" aria-hidden="true" />
-                      </button>
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-black text-white">{lead.name}</div>
+                      <div className="truncate text-xs text-white/35">{platformName(platform)} · {visibleHandle(lead)}</div>
                     </div>
-                  </article>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {score > 0 && <span className="text-xs font-black" style={{ color: scoreColor(score) }}>{score.toFixed(1)}</span>}
+                      <Send className="h-3.5 w-3.5 text-[#00f5d4]" />
+                    </div>
+                  </button>
                 );
               })}
             </div>
@@ -1488,40 +1283,77 @@ export default function ShortsAgencyOS() {
         ) : null}
 
         {view === "pipeline" ? (
-          <PipelineView
-            leads={liveLeads}
-            filteredLeads={filteredLeads}
-            onDragStart={onDragStart}
-            onDropStage={onDropStage}
-            onSelect={(leadId) => {
-              setSelectedLeadId(leadId);
-              setView("feed");
-            }}
-          />
+          <PipelineView leads={leads} filteredLeads={filteredLeads} onDragStart={onDragStart} onDropStage={onDropStage} onSelect={(id) => { setSelectedLeadId(id); setView("feed"); }} />
         ) : null}
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-[#070707]/95 px-4 py-3 backdrop-blur md:hidden">
+      {/* mobile nav */}
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.07] bg-[#060606]/95 px-4 py-3 backdrop-blur md:hidden">
         <div className="mx-auto grid max-w-md grid-cols-4 gap-2">
           {navItems.map((item) => {
             const Icon = item.icon;
             return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setView(item.id)}
-                className={clsx(
-                  "grid h-14 place-items-center rounded-lg text-[11px] font-black",
-                  view === item.id ? "bg-white text-black" : "bg-white/[0.06] text-white/65"
-                )}
-              >
-                <Icon className="h-5 w-5" aria-hidden="true" />
+              <button key={item.id} type="button" onClick={() => setView(item.id)}
+                className={clsx("grid h-14 place-items-center rounded-xl text-[11px] font-black",
+                  view === item.id ? "bg-white text-black" : "bg-white/[0.05] text-white/50")}>
+                <Icon className="h-5 w-5" />
                 {item.label}
               </button>
             );
           })}
         </div>
       </nav>
+
+      {/* toast */}
+      {toast ? (
+        <div className="fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-2xl border border-white/10 bg-[#111] px-5 py-3 text-sm font-black text-white shadow-2xl">
+          {toast}
+        </div>
+      ) : null}
+
+      {/* delete confirm */}
+      {deleteConfirm ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#111] p-6 shadow-2xl">
+            <Trash2 className="h-8 w-8 text-[#ff2d55]" />
+            <h3 className="mt-3 text-lg font-black text-white">Delete {deleteConfirm.name}?</h3>
+            <p className="mt-1 text-sm text-white/45">This is permanent. All outreach history for this lead goes with it.</p>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setDeleteConfirm(null)} className="h-11 rounded-xl bg-white/10 text-sm font-black text-white">Cancel</button>
+              <button type="button" onClick={() => deleteLead(deleteConfirm)} className="h-11 rounded-xl bg-[#ff2d55] text-sm font-black text-white">Delete</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* deal value modal */}
+      {dealValueModal ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#111] p-6 shadow-2xl">
+            <DollarSign className="h-7 w-7 text-[#00f5d4]" />
+            <h3 className="mt-2 text-lg font-black text-white">What did this deal close for?</h3>
+            <p className="mt-1 text-sm text-white/45"><span className="font-black text-white">{dealValueModal.lead.name}</span> just moved to <span className="font-black text-[#00f5d4]">{dealValueModal.stage}</span>.</p>
+            <DealValueInput lead={dealValueModal.lead} onSave={(v) => { updateDealValue(dealValueModal.lead, v); setDealValueModal(null); }} onSkip={() => setDealValueModal(null)} />
+          </div>
+        </div>
+      ) : null}
     </main>
+  );
+}
+
+function DealValueInput({ lead, onSave, onSkip }) {
+  const [val, setVal] = useState(String(lead.deal_value || ""));
+  return (
+    <div className="mt-4 grid gap-3">
+      <div className="relative">
+        <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-white/35">$</span>
+        <input type="number" min="0" step="100" value={val} onChange={(e) => setVal(e.target.value)} placeholder="2500" autoFocus
+          className="h-13 w-full rounded-xl border border-white/10 bg-black/40 py-3 pl-8 pr-4 text-xl font-black text-white placeholder:text-white/20 focus:border-[#00f5d4] focus:outline-none" />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <button type="button" onClick={onSkip} className="h-11 rounded-xl bg-white/[0.07] text-sm font-black text-white/60">Skip</button>
+        <button type="button" onClick={() => onSave(Number(val || 0))} className="h-11 rounded-xl bg-[#00f5d4] text-sm font-black text-black">Save</button>
+      </div>
+    </div>
   );
 }
