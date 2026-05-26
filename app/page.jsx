@@ -680,7 +680,7 @@ export default function LandingPage() {
               <div className="pvs-col" style={{color:"rgba(255,45,85,.6)"}}>✕ The old way</div>
               <div className="pvs-col" style={{color:"rgba(0,245,212,.6)"}}>✓ With Shorts Agency OS</div>
             </div>
-            {[["Generic "I love your content" DMs that get 2% reply rates","Messages that open with their actual sub count, reel gap, and missed revenue"],
+            {[["Generic \u201CI love your content\u201D DMs that get 2% reply rates","Messages that open with their actual sub count, reel gap, and missed revenue"],
               ["Burning AI credits on cold leads with no money signal","Hard 7.0 threshold — the AI won't write a word for leads that won't close"],
               ["Searching YouTube, Instagram, and Maps in three separate tabs","One query hits all three and enriches every result with follower counts automatically"],
               ["Deal value never logged — revenue dashboard shows $0 all month","Modal fires the second a lead hits Booked or Closed. Revenue always current"],
