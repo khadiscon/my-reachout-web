@@ -1,3 +1,4 @@
+import DemoGate from "@/components/DemoGate";
 import ShortsAgencyOS from "@/components/ShortsAgencyOS";
 
 export const metadata = {
@@ -5,5 +6,9 @@ export const metadata = {
 };
 
 export default function AppPage() {
-  return <ShortsAgencyOS />;
+  return (
+    <DemoGate>
+      <ShortsAgencyOS />
+    </DemoGate>
+  );
 }

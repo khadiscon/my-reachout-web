@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useIsDemo } from "@/lib/demo-context";
 import {
   AlertCircle,
   AtSign,
@@ -13,6 +14,7 @@ import {
   Copy,
   DollarSign,
   Flame,
+  Globe,
   Home,
   Instagram,
   LogOut,
@@ -106,7 +108,7 @@ const seedLeads = [
     follower_counts: { instagram: 15300 },
     platform_payload: {
       instagram: { bio: "Austin strength studio", reelCount: 1 },
-      googleMaps: { rating: 4.8, userRatingsTotal: 184, types: ["gym", "health"] }
+      mapbox: { category: "gym, health", lat: 30.26, lng: -97.74, city: "Austin" }
     },
     ai_score: 7.2,
     score_breakdown: { contentWeakness: 7, shortFormGap: 7, moneySignal: 8, urgency: 7, platformPresence: 6 },
@@ -162,6 +164,72 @@ function formatCount(value) {
 function platformName(platform) {
   return platform === "x" ? "X" : platform.charAt(0).toUpperCase() + platform.slice(1);
 }
+
+function platformUrl(platform, lead) {
+  if (platform === "youtube") return lead.youtube_url || null;
+  if (platform === "instagram") return lead.instagram_handle ? `https://instagram.com/${lead.instagram_handle}` : null;
+  if (platform === "x") return lead.x_handle ? `https://x.com/${lead.x_handle}` : null;
+  if (platform === "email") return lead.email ? `mailto:${lead.email}` : null;
+  if (platform === "website") return lead.website || null;
+  return null;
+}
+
+function PlatformLinks({ lead, size = "md" }) {
+  const entries = [];
+
+  if (lead.youtube_url) entries.push({
+    platform: "youtube", url: lead.youtube_url,
+    icon: <Youtube className={size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5"} />,
+    label: lead.follower_counts?.youtube ? formatCount(lead.follower_counts.youtube) : "YouTube",
+    color: "#ff2d55"
+  });
+  if (lead.instagram_handle) entries.push({
+    platform: "instagram", url: `https://instagram.com/${lead.instagram_handle}`,
+    icon: <Instagram className={size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5"} />,
+    label: lead.follower_counts?.instagram ? formatCount(lead.follower_counts.instagram) : `@${lead.instagram_handle}`,
+    color: "#e1306c"
+  });
+  if (lead.x_handle) entries.push({
+    platform: "x", url: `https://x.com/${lead.x_handle}`,
+    icon: <AtSign className={size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5"} />,
+    label: lead.follower_counts?.x ? formatCount(lead.follower_counts.x) : `@${lead.x_handle}`,
+    color: "#fff"
+  });
+  if (lead.website) entries.push({
+    platform: "website", url: lead.website,
+    icon: <Globe className={size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5"} />,
+    label: "Website",
+    color: "#00f5d4"
+  });
+  if (lead.email) entries.push({
+    platform: "email", url: `mailto:${lead.email}`,
+    icon: <AtSign className={size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5"} />,
+    label: lead.email,
+    color: "#ffb703"
+  });
+
+  if (!entries.length) return null;
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {entries.map(({ platform, url, icon, label, color }) => (
+        <a
+          key={platform}
+          href={url}
+          target={platform === "email" ? "_self" : "_blank"}
+          rel="noopener noreferrer"
+          title={`Open ${platformName(platform)}`}
+          className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs font-black transition hover:border-white/20 hover:bg-white/10"
+          style={{ color }}
+        >
+          {icon}
+          {label}
+        </a>
+      ))}
+    </div>
+  );
+}
+
 
 function scoreColor(score) {
   if (score >= 8) return "#00f5d4";
@@ -220,6 +288,26 @@ function primaryPlatform(lead) {
 
 function leadInitials(lead) {
   return (lead.name || "Lead").split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+}
+
+function LeadAvatar({ lead, size = "md" }) {
+  const [imgError, setImgError] = useState(false);
+  const sizeClasses = size === "lg" ? "h-16 w-16 text-xl rounded-xl" : size === "sm" ? "h-9 w-9 text-xs rounded-lg" : "h-12 w-12 text-base rounded-lg";
+  if (lead.profile_image && !imgError) {
+    return (
+      <img
+        src={lead.profile_image}
+        alt={lead.name}
+        onError={() => setImgError(true)}
+        className={`${sizeClasses} shrink-0 object-cover`}
+      />
+    );
+  }
+  return (
+    <div className={`${sizeClasses} shrink-0 grid place-items-center bg-white/10 font-black text-white`}>
+      {leadInitials(lead)}
+    </div>
+  );
 }
 
 function platformIcon(platform) {
@@ -381,36 +469,31 @@ function LeadReel({ lead, index, total, busy, onPass, onDelete, onNext, onPrevio
         {/* left: identity + actions */}
         <div className="p-5">
           <div className="flex items-start gap-4">
-            <div className="grid h-16 w-16 shrink-0 place-items-center rounded-xl border border-white/15 bg-white/[0.07] text-xl font-black">
-              {leadInitials(lead)}
-            </div>
+            <LeadAvatar lead={lead} size="lg" />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <PlatformIcon className="h-4 w-4 shrink-0 text-[#00f5d4]" />
-                <span className="truncate text-xs font-bold text-white/55">{visibleHandle(lead)}</span>
+                {platformUrl(platform, lead) ? (
+                  <a href={platformUrl(platform, lead)} target={platform === "email" ? "_self" : "_blank"} rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#00f5d4] hover:underline">
+                    <PlatformIcon className="h-4 w-4 shrink-0" />
+                    {visibleHandle(lead)}
+                  </a>
+                ) : (
+                  <>
+                    <PlatformIcon className="h-4 w-4 shrink-0 text-[#00f5d4]" />
+                    <span className="truncate text-xs font-bold text-white/55">{visibleHandle(lead)}</span>
+                  </>
+                )}
               </div>
               <h1 className="mt-1 text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">{lead.name}</h1>
               <p className="mt-1 text-xs font-bold uppercase tracking-widest text-[#00f5d4]">{lead.niche || lead.source || "opportunity"}</p>
             </div>
           </div>
 
-          {/* follower counts */}
-          {Object.keys(lead.follower_counts || {}).length > 0 && (
-            <div className="mt-4 flex flex-wrap gap-2">
-              {Object.entries(lead.follower_counts || {}).map(([p, v]) => (
-                <span key={p} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs font-black text-white">
-                  {p === "youtube" ? <Youtube className="h-3 w-3" /> : p === "instagram" ? <Instagram className="h-3 w-3" /> : <AtSign className="h-3 w-3" />}
-                  {formatCount(v)}
-                </span>
-              ))}
-              {presence.present.map((pl) => (
-                <span key={pl} className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs font-black text-white/60">{pl}</span>
-              ))}
-              {presence.missing.map((pl) => (
-                <span key={pl} className="rounded-full border border-[#ff2d55]/20 bg-[#ff2d55]/10 px-3 py-1 text-xs font-black text-[#ff2d55]/80">No {pl}</span>
-              ))}
-            </div>
-          )}
+          {/* platform links */}
+          <div className="mt-4">
+            <PlatformLinks lead={lead} size="md" />
+          </div>
 
           {/* AI reasoning */}
           <p className="mt-4 text-sm leading-relaxed text-white/65">
@@ -676,9 +759,7 @@ function FinderPanel({ source, setSource, keyword, setKeyword, city, setCity, ma
               return (
                 <article key={`${lead.source}-${lead.name}`} className="rounded-xl border border-white/10 bg-black/20 p-4">
                   <div className="flex items-start justify-between gap-2">
-                    <div className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-white/10 text-base font-black text-white">
-                      {leadInitials(lead)}
-                    </div>
+                    <LeadAvatar lead={lead} size="md" />
                     {pScore > 0 && (
                       <span className="text-sm font-black" style={{ color: scoreColor(pScore) }}>{pScore.toFixed(1)}</span>
                     )}
@@ -689,6 +770,9 @@ function FinderPanel({ source, setSource, keyword, setKeyword, city, setCity, ma
                     <p className="mt-1 text-xs font-black text-[#00f5d4]">{formatCount(totalFollowers)} total followers</p>
                   )}
                   {lead.address && <p className="mt-0.5 truncate text-xs text-white/35">{lead.address}</p>}
+                  <div className="mt-2">
+                    <PlatformLinks lead={lead} size="sm" />
+                  </div>
                   <button type="button" onClick={() => onAdd(lead)} className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-white text-sm font-black text-black hover:bg-white/90">
                     <Plus className="h-4 w-4" />
                     Add to queue
@@ -805,11 +889,16 @@ function PipelineView({ leads, filteredLeads, onDragStart, onDropStage, onSelect
                     onClick={() => onSelect(lead.id)}
                     className="w-full rounded-xl border border-white/[0.07] bg-white/[0.05] p-3 text-left transition hover:border-white/20"
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-sm font-black text-white">{lead.name}</span>
-                      {lead.ai_score > 0 && <span className="text-xs font-black" style={{ color: scoreColor(Number(lead.ai_score)) }}>{Number(lead.ai_score).toFixed(1)}</span>}
+                    <div className="flex items-center gap-2">
+                      <LeadAvatar lead={lead} size="sm" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate text-sm font-black text-white">{lead.name}</span>
+                          {lead.ai_score > 0 && <span className="text-xs font-black" style={{ color: scoreColor(Number(lead.ai_score)) }}>{Number(lead.ai_score).toFixed(1)}</span>}
+                        </div>
+                        <div className="mt-0.5 truncate text-xs text-white/40">{lead.niche || visibleHandle(lead)}</div>
+                      </div>
                     </div>
-                    <div className="mt-1 truncate text-xs text-white/40">{lead.niche || visibleHandle(lead)}</div>
                     {Number(lead.deal_value || 0) > 0 && (
                       <div className="mt-1.5 text-xs font-black text-[#16ff7a]">${Number(lead.deal_value).toLocaleString()}</div>
                     )}
@@ -827,6 +916,7 @@ function PipelineView({ leads, filteredLeads, onDragStart, onDropStage, onSelect
 // ─── main app ────────────────────────────────────────────────────────────────
 
 export default function ShortsAgencyOS() {
+  const isDemo = useIsDemo();
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const [session, setSession] = useState(null);
   const [email, setEmail] = useState("");
@@ -925,6 +1015,7 @@ export default function ShortsAgencyOS() {
   }
 
   async function addLead(lead) {
+    if (isDemo) return;
     try {
       if (session) {
         const data = await request("/api/leads", { method: "POST", body: JSON.stringify(lead) });
@@ -937,6 +1028,7 @@ export default function ShortsAgencyOS() {
   }
 
   async function deleteLead(lead) {
+    if (isDemo) return;
     if (session) {
       try { await request(`/api/leads/${lead.id}`, { method: "DELETE" }); } catch (e) { setError(e.message); return; }
     }
@@ -947,6 +1039,7 @@ export default function ShortsAgencyOS() {
 
   async function runLeadSearch(e) {
     e.preventDefault();
+    if (isDemo) return;
     setError("");
     setMessagePanel(null);
     setBusy("search");
@@ -970,6 +1063,7 @@ export default function ShortsAgencyOS() {
   }
 
   async function scoreLead(lead) {
+    if (isDemo) return;
     setBusy(`score-${lead.id}`);
     setError("");
     try {
@@ -979,6 +1073,7 @@ export default function ShortsAgencyOS() {
   }
 
   async function scoreAllHot() {
+    if (isDemo) return;
     const toScore = leads.filter((l) => !l.ai_score || l.ai_score === 0);
     if (!toScore.length) { showToast("All leads already scored."); return; }
     setBusy("score-all");
@@ -1014,6 +1109,7 @@ export default function ShortsAgencyOS() {
   }
 
   async function changeStatus(lead, platform, status, extra = {}) {
+    if (isDemo) return;
     const nextLead = upsertStatus(lead, platform, status, extra);
     mergeLead(nextLead);
     if (!session) return;
@@ -1026,6 +1122,7 @@ export default function ShortsAgencyOS() {
   }
 
   async function moveStage(lead, stage) {
+    if (isDemo) return;
     mergeLead({ ...lead, pipeline_stage: stage });
     if ((stage === "Booked" || stage === "Closed") && Number(lead.deal_value || 0) === 0) {
       setDealValueModal({ lead: { ...lead, pipeline_stage: stage }, stage });
@@ -1114,6 +1211,13 @@ export default function ShortsAgencyOS() {
     <main className="min-h-screen bg-[#060606] px-4 pb-28 pt-4 text-white sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1480px] space-y-5">
 
+        {/* demo banner */}
+        {isDemo && (
+          <div className="sticky top-0 z-40 -mx-4 flex items-center justify-center gap-2 bg-[#FFB703]/10 border-b border-[#FFB703]/20 px-4 py-2 text-xs font-black text-[#FFB703] sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            Demo mode — read only. Sign in to make changes.
+          </div>
+        )}
         {/* header */}
         <header className="sticky top-0 z-30 -mx-4 border-b border-white/[0.07] bg-[#060606]/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
           <div className="mx-auto flex max-w-[1480px] items-center justify-between gap-4">
@@ -1267,7 +1371,8 @@ export default function ShortsAgencyOS() {
                     disabled={!isHot}
                     title={!isHot ? `Score ${score.toFixed(1)} — below threshold` : undefined}
                   >
-                    <div className="min-w-0">
+                    <LeadAvatar lead={lead} size="sm" />
+                    <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-black text-white">{lead.name}</div>
                       <div className="truncate text-xs text-white/35">{platformName(platform)} · {visibleHandle(lead)}</div>
                     </div>

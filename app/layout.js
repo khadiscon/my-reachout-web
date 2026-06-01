@@ -16,11 +16,12 @@ export const metadata = {
     title: "Shorts Agency OS",
     description: "AI-powered lead finder, scorer, and outreach writer for short-form content agencies.",
   },
-  viewport: {
-    width: "device-width",
-    initialScale: 1,
-    maximumScale: 1,
-  },
+};
+
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
   themeColor: "#060606",
 };
 

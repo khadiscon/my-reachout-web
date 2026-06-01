@@ -4,8 +4,8 @@ import { searchMapsLeads } from "@/lib/source-clients";
 import { mergeCrossPlatformLeads } from "@/lib/platform-presence";
 
 export async function POST(request) {
-  if (!process.env.GOOGLE_MAPS_API_KEY) {
-    return missingEnvResponse(["GOOGLE_MAPS_API_KEY"]);
+  if (!process.env.MAPBOX_API_KEY) {
+    return missingEnvResponse(["MAPBOX_API_KEY"]);
   }
 
   try {
