@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import AdminGate from "@/components/DemoGate";
 import {
   AlertCircle,
   AtSign,
@@ -13,6 +14,7 @@ import {
   Copy,
   DollarSign,
   Flame,
+  Globe,
   Home,
   Instagram,
   LogOut,
@@ -162,6 +164,72 @@ function formatCount(value) {
 function platformName(platform) {
   return platform === "x" ? "X" : platform.charAt(0).toUpperCase() + platform.slice(1);
 }
+
+function platformUrl(platform, lead) {
+  if (platform === "youtube") return lead.youtube_url || null;
+  if (platform === "instagram") return lead.instagram_handle ? `https://instagram.com/${lead.instagram_handle}` : null;
+  if (platform === "x") return lead.x_handle ? `https://x.com/${lead.x_handle}` : null;
+  if (platform === "email") return lead.email ? `mailto:${lead.email}` : null;
+  if (platform === "website") return lead.website || null;
+  return null;
+}
+
+function PlatformLinks({ lead, size = "md" }) {
+  const entries = [];
+
+  if (lead.youtube_url) entries.push({
+    platform: "youtube", url: lead.youtube_url,
+    icon: <Youtube className={size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5"} />,
+    label: lead.follower_counts?.youtube ? formatCount(lead.follower_counts.youtube) : "YouTube",
+    color: "#ff2d55"
+  });
+  if (lead.instagram_handle) entries.push({
+    platform: "instagram", url: `https://instagram.com/${lead.instagram_handle}`,
+    icon: <Instagram className={size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5"} />,
+    label: lead.follower_counts?.instagram ? formatCount(lead.follower_counts.instagram) : `@${lead.instagram_handle}`,
+    color: "#e1306c"
+  });
+  if (lead.x_handle) entries.push({
+    platform: "x", url: `https://x.com/${lead.x_handle}`,
+    icon: <AtSign className={size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5"} />,
+    label: lead.follower_counts?.x ? formatCount(lead.follower_counts.x) : `@${lead.x_handle}`,
+    color: "#fff"
+  });
+  if (lead.website) entries.push({
+    platform: "website", url: lead.website,
+    icon: <Globe className={size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5"} />,
+    label: "Website",
+    color: "#00f5d4"
+  });
+  if (lead.email) entries.push({
+    platform: "email", url: `mailto:${lead.email}`,
+    icon: <AtSign className={size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5"} />,
+    label: lead.email,
+    color: "#ffb703"
+  });
+
+  if (!entries.length) return null;
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {entries.map(({ platform, url, icon, label, color }) => (
+        <a
+          key={platform}
+          href={url}
+          target={platform === "email" ? "_self" : "_blank"}
+          rel="noopener noreferrer"
+          title={`Open ${platformName(platform)}`}
+          className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs font-black transition hover:border-white/20 hover:bg-white/10"
+          style={{ color }}
+        >
+          {icon}
+          {label}
+        </a>
+      ))}
+    </div>
+  );
+}
+
 
 function scoreColor(score) {
   if (score >= 8) return "#00f5d4";
@@ -404,31 +472,28 @@ function LeadReel({ lead, index, total, busy, onPass, onDelete, onNext, onPrevio
             <LeadAvatar lead={lead} size="lg" />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <PlatformIcon className="h-4 w-4 shrink-0 text-[#00f5d4]" />
-                <span className="truncate text-xs font-bold text-white/55">{visibleHandle(lead)}</span>
+                {platformUrl(platform, lead) ? (
+                  <a href={platformUrl(platform, lead)} target={platform === "email" ? "_self" : "_blank"} rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#00f5d4] hover:underline">
+                    <PlatformIcon className="h-4 w-4 shrink-0" />
+                    {visibleHandle(lead)}
+                  </a>
+                ) : (
+                  <>
+                    <PlatformIcon className="h-4 w-4 shrink-0 text-[#00f5d4]" />
+                    <span className="truncate text-xs font-bold text-white/55">{visibleHandle(lead)}</span>
+                  </>
+                )}
               </div>
               <h1 className="mt-1 text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">{lead.name}</h1>
               <p className="mt-1 text-xs font-bold uppercase tracking-widest text-[#00f5d4]">{lead.niche || lead.source || "opportunity"}</p>
             </div>
           </div>
 
-          {/* follower counts */}
-          {Object.keys(lead.follower_counts || {}).length > 0 && (
-            <div className="mt-4 flex flex-wrap gap-2">
-              {Object.entries(lead.follower_counts || {}).map(([p, v]) => (
-                <span key={p} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs font-black text-white">
-                  {p === "youtube" ? <Youtube className="h-3 w-3" /> : p === "instagram" ? <Instagram className="h-3 w-3" /> : <AtSign className="h-3 w-3" />}
-                  {formatCount(v)}
-                </span>
-              ))}
-              {presence.present.map((pl) => (
-                <span key={pl} className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs font-black text-white/60">{pl}</span>
-              ))}
-              {presence.missing.map((pl) => (
-                <span key={pl} className="rounded-full border border-[#ff2d55]/20 bg-[#ff2d55]/10 px-3 py-1 text-xs font-black text-[#ff2d55]/80">No {pl}</span>
-              ))}
-            </div>
-          )}
+          {/* platform links */}
+          <div className="mt-4">
+            <PlatformLinks lead={lead} size="md" />
+          </div>
 
           {/* AI reasoning */}
           <p className="mt-4 text-sm leading-relaxed text-white/65">
@@ -705,6 +770,9 @@ function FinderPanel({ source, setSource, keyword, setKeyword, city, setCity, ma
                     <p className="mt-1 text-xs font-black text-[#00f5d4]">{formatCount(totalFollowers)} total followers</p>
                   )}
                   {lead.address && <p className="mt-0.5 truncate text-xs text-white/35">{lead.address}</p>}
+                  <div className="mt-2">
+                    <PlatformLinks lead={lead} size="sm" />
+                  </div>
                   <button type="button" onClick={() => onAdd(lead)} className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-white text-sm font-black text-black hover:bg-white/90">
                     <Plus className="h-4 w-4" />
                     Add to queue
@@ -1359,6 +1427,7 @@ export default function ShortsAgencyOS() {
           </div>
         </div>
       ) : null}
+      <AdminGate session={session} onAdminUnlock={() => loadLeads()} />
     </main>
   );
 }
