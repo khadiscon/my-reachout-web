@@ -10,10 +10,15 @@ export async function POST(request) {
 
   try {
     const body = await request.json();
+    const handles = body.handles || [];
+    if (!handles.length) {
+      return json({ leads: [], message: "Instagram search requires @handles. Enter one or more Instagram handles to look up." });
+    }
+
     const leads = mergeCrossPlatformLeads(
       await searchInstagramLeads({
-        keyword: body.keyword || "business podcast",
-        handles: body.handles || [],
+        keyword: body.keyword || "",
+        handles,
         limit: body.limit || 20,
         includeFiltered: body.includeFiltered
       })

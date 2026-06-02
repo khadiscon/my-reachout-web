@@ -945,6 +945,27 @@ export default function ShortsAgencyOS() {
     setTimeout(() => setToast(""), 2500);
   }
 
+  // Guest: load from localStorage on mount
+  useEffect(() => {
+    if (!isDemo) return;
+    try {
+      const saved = localStorage.getItem("guest_leads");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length) {
+          setLeads(parsed);
+          setSelectedLeadId(parsed[0]?.id || null);
+        }
+      }
+    } catch {}
+  }, [isDemo]);
+
+  // Guest: save to localStorage whenever leads change
+  useEffect(() => {
+    if (!isDemo) return;
+    try { localStorage.setItem("guest_leads", JSON.stringify(leads)); } catch {}
+  }, [isDemo, leads]);
+
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(({ data }) => {
@@ -1015,12 +1036,12 @@ export default function ShortsAgencyOS() {
   }
 
   async function addLead(lead) {
-    if (isDemo) return;
     try {
-      if (session) {
+      if (!isDemo && session) {
         const data = await request("/api/leads", { method: "POST", body: JSON.stringify(lead) });
         mergeLead(data.lead);
       } else {
+        // Guest or no session — add to local state only
         mergeLead({ ...lead, id: crypto.randomUUID(), created_at: new Date().toISOString(), pipeline_stage: "Prospect", outreach_statuses: [] });
       }
       setView("feed");
@@ -1028,8 +1049,7 @@ export default function ShortsAgencyOS() {
   }
 
   async function deleteLead(lead) {
-    if (isDemo) return;
-    if (session) {
+    if (!isDemo && session) {
       try { await request(`/api/leads/${lead.id}`, { method: "DELETE" }); } catch (e) { setError(e.message); return; }
     }
     removeLead(lead.id);
@@ -1050,21 +1070,23 @@ export default function ShortsAgencyOS() {
         : "/api/leads/import";
 
       const body = source === "auto" ? { keyword, category: keyword, city, save: isDemo ? false : saveResults, includeFiltered: true }
-        : source === "maps" ? { category: keyword, city, save: isDemo ? false : saveResults }
-        : source === "manual" ? { text: manualText, niche: keyword, save: isDemo ? false : saveResults }
-        : { keyword, save: isDemo ? false : saveResults };
+        : source === "maps" ? { category: keyword, city, save: isDemo ? false : saveResults, includeFiltered: true }
+        : source === "manual" ? { text: manualText, niche: keyword, save: isDemo ? false : saveResults, includeFiltered: true }
+        : { keyword, save: isDemo ? false : saveResults, includeFiltered: true };
 
       const data = await request(endpoint, { method: "POST", body: JSON.stringify(body) });
-      const results = data.saved || data.leads || [];
-      // Cap results for guests
-      const capped = isDemo ? results.slice(0, 3) : results;
-      if (data.saved?.length) { capped.forEach(mergeLead); setSearchResults(capped); }
-      else setSearchResults(capped);
+
+      // data.saved is always an array ([] when not saving), so we can't use || to fallback.
+      // Use saved only when it actually has items, otherwise use leads.
+      const allResults = data.saved?.length ? data.saved : (data.leads || []);
+      const capped = isDemo ? allResults.slice(0, 3) : allResults;
+
+      if (data.saved?.length) { capped.forEach(mergeLead); }
+      setSearchResults(capped);
     } catch (e) { setError(e.message); } finally { setBusy(""); }
   }
 
   async function scoreLead(lead) {
-    if (isDemo) return;
     setBusy(`score-${lead.id}`);
     setError("");
     try {
@@ -1074,7 +1096,6 @@ export default function ShortsAgencyOS() {
   }
 
   async function scoreAllHot() {
-    if (isDemo) return;
     const toScore = leads.filter((l) => !l.ai_score || l.ai_score === 0);
     if (!toScore.length) { showToast("All leads already scored."); return; }
     setBusy("score-all");
@@ -1110,10 +1131,9 @@ export default function ShortsAgencyOS() {
   }
 
   async function changeStatus(lead, platform, status, extra = {}) {
-    if (isDemo) return;
     const nextLead = upsertStatus(lead, platform, status, extra);
     mergeLead(nextLead);
-    if (!session) return;
+    if (isDemo || !session) return;
     try {
       await request(`/api/leads/${lead.id}`, {
         method: "PATCH",
@@ -1123,12 +1143,11 @@ export default function ShortsAgencyOS() {
   }
 
   async function moveStage(lead, stage) {
-    if (isDemo) return;
     mergeLead({ ...lead, pipeline_stage: stage });
     if ((stage === "Booked" || stage === "Closed") && Number(lead.deal_value || 0) === 0) {
       setDealValueModal({ lead: { ...lead, pipeline_stage: stage }, stage });
     }
-    if (!session) return;
+    if (isDemo || !session) return;
     try { await request(`/api/leads/${lead.id}`, { method: "PATCH", body: JSON.stringify({ lead: { pipeline_stage: stage } }) }); }
     catch (e) { setError(e.message); }
   }
@@ -1217,7 +1236,7 @@ export default function ShortsAgencyOS() {
           <div className="sticky top-0 z-40 -mx-4 flex items-center justify-center gap-2 border-b border-white/[0.06] bg-[#060606]/80 px-4 py-2 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-black text-white/30">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-              Guest mode — changes won't save · Lead results limited to 3
+              Guest workspace · Your work saves locally · Lead results capped at 3
             </span>
           </div>
         )}

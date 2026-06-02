@@ -13,13 +13,13 @@ function splitInputs(text = "") {
 async function enrichInstagramHandles(handles, keyword) {
   if (!process.env.APIFY_API_KEY || !handles.length) return [];
 
-  const directUrls = handles.map((handle) => `https://www.instagram.com/${String(handle).replace(/^@/, "")}/`);
+  const usernames = handles.map((h) => String(h).replace(/^@/, "").trim()).filter(Boolean);
   const response = await fetch(
     `https://api.apify.com/v2/acts/apify~instagram-profile-scraper/run-sync-get-dataset-items?token=${process.env.APIFY_API_KEY}`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ directUrls, resultsType: "details", resultsLimit: handles.length })
+      body: JSON.stringify({ usernames, resultsLimit: usernames.length })
     }
   );
 
