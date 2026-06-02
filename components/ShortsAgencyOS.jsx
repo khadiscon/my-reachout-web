@@ -1039,7 +1039,6 @@ export default function ShortsAgencyOS() {
 
   async function runLeadSearch(e) {
     e.preventDefault();
-    if (isDemo) return;
     setError("");
     setMessagePanel(null);
     setBusy("search");
@@ -1050,15 +1049,17 @@ export default function ShortsAgencyOS() {
         : source === "maps" ? "/api/leads/search/maps"
         : "/api/leads/import";
 
-      const body = source === "auto" ? { keyword, category: keyword, city, save: saveResults, includeFiltered: true }
-        : source === "maps" ? { category: keyword, city, save: saveResults }
-        : source === "manual" ? { text: manualText, niche: keyword, save: saveResults }
-        : { keyword, save: saveResults };
+      const body = source === "auto" ? { keyword, category: keyword, city, save: isDemo ? false : saveResults, includeFiltered: true }
+        : source === "maps" ? { category: keyword, city, save: isDemo ? false : saveResults }
+        : source === "manual" ? { text: manualText, niche: keyword, save: isDemo ? false : saveResults }
+        : { keyword, save: isDemo ? false : saveResults };
 
       const data = await request(endpoint, { method: "POST", body: JSON.stringify(body) });
-      const saved = data.saved || [];
-      if (saved.length) { saved.forEach(mergeLead); setSearchResults(saved); }
-      else setSearchResults(data.leads || []);
+      const results = data.saved || data.leads || [];
+      // Cap results for guests
+      const capped = isDemo ? results.slice(0, 3) : results;
+      if (data.saved?.length) { capped.forEach(mergeLead); setSearchResults(capped); }
+      else setSearchResults(capped);
     } catch (e) { setError(e.message); } finally { setBusy(""); }
   }
 
@@ -1211,11 +1212,13 @@ export default function ShortsAgencyOS() {
     <main className="min-h-screen bg-[#060606] px-4 pb-28 pt-4 text-white sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1480px] space-y-5">
 
-        {/* demo banner */}
+        {/* guest indicator */}
         {isDemo && (
-          <div className="sticky top-0 z-40 -mx-4 flex items-center justify-center gap-2 bg-[#FFB703]/10 border-b border-[#FFB703]/20 px-4 py-2 text-xs font-black text-[#FFB703] sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            Demo mode — read only. Sign in to make changes.
+          <div className="sticky top-0 z-40 -mx-4 flex items-center justify-center gap-2 border-b border-white/[0.06] bg-[#060606]/80 px-4 py-2 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-black text-white/30">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              Guest mode — changes won't save · Lead results limited to 3
+            </span>
           </div>
         )}
         {/* header */}
